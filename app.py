@@ -16,6 +16,7 @@ Rodar:
     streamlit run app.py
 """
 
+import tempfile
 from datetime import date, timedelta
 
 import streamlit as st
@@ -36,6 +37,8 @@ from sheets_sync import (
 )
 from prefacios_drive import conectar_drive, listar_prefacios, baixar_texto_prefacio
 from secoes_roteiro import SECOES
+from roteiro_completo import montar_pdf
+from roteiro_render import cor_do_tema
 
 st.set_page_config(page_title="Monte Senário", page_icon="⛪", layout="centered")
 
@@ -109,6 +112,62 @@ def selecionar_horario(data_escolhida: date, key_prefix: str) -> str:
     return st.selectbox(
         "Horário da missa", horarios_do_dia, key=f"{key_prefix}_{data_escolhida.isoformat()}"
     )
+
+
+def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
+    """Converte uma linha da planilha (dict de sheets_sync) no formato de
+    dados esperado por roteiro_completo.montar_pdf(). Alguns detalhes
+    finos ainda não são capturados automaticamente pelo scraper geral —
+    aclamação ao Evangelho com versículo específico, o nome do
+    evangelista na 'Proclamação do Evangelho...', e o refrão isolado do
+    Salmo — e usam um valor padrão razoável aqui. Se precisar do texto
+    exato, o operador pode colar em 'Gerenciar Roteiro' (seções 09, 11 e
+    12), que sempre tem prioridade sobre esses padrões."""
+    leitura2 = None
+    if linha.get("LEITURA2_TEXTO"):
+        leitura2 = {"texto_corrido": linha.get("LEITURA2_TEXTO", "")}
+
+    resumo_oracao = linha.get("ORACAO_EUCARISTICA_SUGERIDA") or ""
+    if " — " in resumo_oracao:
+        nome_oracao, motivo_oracao = resumo_oracao.split(" — ", 1)
+    else:
+        nome_oracao, motivo_oracao = (resumo_oracao or "Oração Eucarística"), ""
+
+    return {
+        "data_iso": linha["DATA"],
+        "titulo_dia": linha.get("TITULO_DIA", ""),
+        "horario_missa": horario,
+        "cor_tema": cor_do_tema(linha.get("COR_LITURGICA", "")),
+        "antifona_entrada": linha.get("ANTIFONA_ENTRADA", ""),
+        "coleta": linha.get("COLETA", ""),
+        "leitura1_ref": linha.get("LEITURA1_REF", ""),
+        "leitura1": {"texto_corrido": linha.get("LEITURA1_TEXTO", "")},
+        "salmo_ref": linha.get("SALMO_REF", ""),
+        "salmo_refrao": overrides.get("09_refrao", ""),
+        "salmo": {"texto_corrido": linha.get("SALMO_TEXTO", "")},
+        "leitura2_ref": linha.get("LEITURA2_REF") or None,
+        "leitura2": leitura2,
+        "aclamacao_refrao": None,
+        "aclamacao_versiculo": None,
+        "evangelho_ref": linha.get("EVANGELHO_REF", ""),
+        "evangelho_proclamacao": "Proclamação do Evangelho de Jesus Cristo",
+        "evangelho": {"texto_corrido": linha.get("EVANGELHO_TEXTO", "")},
+        "oferendas_texto": linha.get("OFERENDAS_TEXTO", ""),
+        "comunhao_texto": linha.get("COMUNHAO_TEXTO", ""),
+        "prefacio_nome": linha.get("PREFACIO_NOME", "") or "(nenhum selecionado ainda)",
+        "prefacio_texto": linha.get("PREFACIO_TEXTO", ""),
+        "oracao_euc": {
+            "nome": nome_oracao,
+            "motivo": motivo_oracao,
+            "texto": linha.get("ORACAO_EUCARISTICA_TEXTO", ""),
+        },
+        "fontes": {
+            "Fonte das leituras": linha.get("FONTE", ""),
+            "Fonte de Oferendas/Comunhão": linha.get("FONTE_OFERENDAS_COMUNHAO", ""),
+            "Fonte do Prefácio": "Google Drive — Orações Eucarísticas" if linha.get("PREFACIO_NOME") else "",
+            "URL da fonte principal": linha.get("URL_FONTE", ""),
+        },
+    }
 
 
 st.title("⛪ Monte Senário")
@@ -187,6 +246,28 @@ with aba_consulta:
         st.caption(
             f"Fonte: {roteiro.get('FONTE', '')} — {roteiro.get('URL_FONTE', '')}"
         )
+
+        st.divider()
+        if st.button("📄 Gerar PDF do roteiro completo (20 seções)"):
+            with st.spinner("Montando o PDF..."):
+                overrides = carregar_overrides_secoes(conectar(), data_escolhida, horario_escolhido)
+                dados_pdf = montar_dados_para_pdf(roteiro, horario_escolhido, overrides)
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    montar_pdf(tmp.name, dados_pdf, overrides=overrides)
+                    caminho_pdf = tmp.name
+            with open(caminho_pdf, "rb") as f:
+                st.download_button(
+                    "⬇️ Baixar PDF",
+                    data=f.read(),
+                    file_name=f"roteiro_{data_escolhida.isoformat()}_{horario_escolhido.replace(':', 'h')}.pdf",
+                    mime="application/pdf",
+                )
+            st.caption(
+                "Confira a seção 02 (Palavras de Abertura) e a Aclamação ao "
+                "Evangelho (seção 11) antes de imprimir — esses dois trechos "
+                "ainda não vêm preenchidos automaticamente; ajuste em "
+                "'Gerenciar Roteiro' se precisar."
+            )
 
 with aba_admin:
     st.write(

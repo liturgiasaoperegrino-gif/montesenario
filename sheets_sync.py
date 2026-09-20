@@ -45,7 +45,7 @@ SCOPES = [
 
 ABA = "Liturgia_Diaria"
 CABECALHO = [
-    "DATA", "HORARIO", "TITULO_DIA", "FONTE", "ANTIFONA_ENTRADA", "COLETA",
+    "DATA", "HORARIO", "TITULO_DIA", "FONTE", "COR_LITURGICA", "ANTIFONA_ENTRADA", "COLETA",
     "LEITURA1_REF", "LEITURA1_TEXTO",
     "SALMO_REF", "SALMO_TEXTO",
     "LEITURA2_REF", "LEITURA2_TEXTO",
@@ -292,7 +292,7 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
         # Página ainda não publicada pela fonte — grava o aviso e deixa
         # o resto em branco, em vez de inventar conteúdo ou sumir com o dia.
         return [
-            d["data"], horario, d["titulo_dia"], "", "", "",
+            d["data"], horario, d["titulo_dia"], "", d["cor_liturgica"], "", "",
             "", "", "", "", "", "", "", "",
             "", "", "",
             "não aplicável (fonte não confirmada)", "",
@@ -326,7 +326,7 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
         fonte_combinada += f" (leituras) + {d['fonte_propers']} (antífona/coleta)"
 
     return [
-        d["data"], horario, d["titulo_dia"], fonte_combinada, d["antifona_entrada"], d["coleta"],
+        d["data"], horario, d["titulo_dia"], fonte_combinada, d["cor_liturgica"], d["antifona_entrada"], d["coleta"],
         d["leitura1_ref"], d["leitura1_texto"],
         d["salmo_ref"], d["salmo_texto"],
         d["leitura2_ref"], d["leitura2_texto"],
