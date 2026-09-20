@@ -36,7 +36,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 import roteiro_fixo as fixo
 from roteiro_render import (
     montar_estilos, paragrafo_versiculo, paragrafo_dialogo,
-    paragrafos_com_respostas_assembleia,
+    paragrafos_com_respostas_assembleia, estilizar_versiculos_inline,
 )
 
 
@@ -59,7 +59,8 @@ def _renderizar_leitura(story, E, dados_leitura: dict, rotulo_ref_style="ref_sec
             story.append(paragrafo_versiculo(numero, texto, E))
     elif dados_leitura.get("texto_corrido"):
         for par in dados_leitura["texto_corrido"].split("\n\n"):
-            story.append(Paragraph(par.replace("\n", "<br/>"), E["corpo"]))
+            par_html = estilizar_versiculos_inline(par.replace("\n", "<br/>"))
+            story.append(Paragraph(par_html, E["corpo"]))
 
 
 def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
@@ -105,7 +106,7 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     data_fmt = f"{dados['data_iso'][8:10]}/{dados['data_iso'][5:7]}/{dados['data_iso'][0:4]}"
     horario = _override_ou(overrides, "00", dados.get("horario_missa", ""))
 
-    story.append(Paragraph("Monte Senário", E["titulo"]))
+    story.append(Paragraph("Montesenario", E["titulo"]))
     story.append(Paragraph(
         f"Roteiro da Missa — {data_fmt}" + (f" — {horario}" if horario else ""),
         E["subtitulo_data"],
@@ -121,17 +122,20 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     else:
         dialogo(fixo.SAUDACAO_INICIAL)
 
-    # 02 — Palavras de Abertura: EM BRANCO por padrão — o operador escreve
-    # via interface (seção "overridable" por excelência; sem override,
-    # o roteiro mostra um aviso discreto em vez de texto genérico).
+    # 02 — Título da Solenidade / Palavras de Abertura: o título do dia
+    # litúrgico (ex.: "25º Domingo do Tempo Comum") é sempre mostrado
+    # automaticamente aqui; já as palavras de abertura em si ficam EM
+    # BRANCO por padrão — o operador escreve via interface (sem
+    # override, mostra um aviso discreto em vez de texto genérico).
     secao_titulo("02", "Título da Solenidade / Palavras de Abertura")
+    story.append(Paragraph(dados["titulo_dia"].strip(), E["dia_liturgico"]))
     over_02 = overrides.get("02")
     if over_02:
         paragrafos_livres(over_02)
     else:
         story.append(Paragraph(
             "(a preencher — use a tela \"Gerenciar Roteiro\" para inserir "
-            "o texto de abertura desta missa)", E["faltante"]
+            "as palavras de abertura desta missa)", E["faltante"]
         ))
 
     # 03 — Ritos Iniciais
@@ -188,7 +192,8 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
                 story.append(paragrafo_versiculo(numero, texto, E, cor_r=True))
         elif dados["salmo"].get("texto_corrido"):
             for par in dados["salmo"]["texto_corrido"].split("\n\n"):
-                story.append(Paragraph(par.replace("\n", "<br/>"), E["corpo"]))
+                par_html = estilizar_versiculos_inline(par.replace("\n", "<br/>"))
+                story.append(Paragraph(par_html, E["corpo"]))
 
     # 10 — Segunda Leitura (só se houver)
     if overrides.get("10"):

@@ -41,6 +41,23 @@ def cor_do_tema(cor_liturgica: str) -> str:
     return CORES_LITURGICAS.get((cor_liturgica or "").lower(), COR_TEMA_PADRAO)
 
 
+def inferir_cor_liturgica(titulo_dia: str) -> str:
+    """Deduz a cor litúrgica pelo título do dia, para quando a fonte não
+    informa a cor diretamente (a CNBB informa; Nova Aliança/Pocket Terço
+    não) — evita que o roteiro saia sem cor de tema só porque a fonte
+    principal não respondeu. Regra simplificada (não cobre exceções como
+    Domingo Gaudete/Laetare em rosa, ou memórias facultativas específicas
+    de mártires) — dá conta do caso comum do calendário litúrgico."""
+    t = (titulo_dia or "").lower()
+    if "quaresma" in t or "advento" in t:
+        return "roxo"
+    if "ramos" in t or "paixão" in t or "sexta-feira santa" in t or "pentecostes" in t or "mártir" in t:
+        return "vermelho"
+    if "páscoa" in t or "pascal" in t or "natal" in t or "solenidade" in t:
+        return "branco"
+    return "verde"  # Tempo Comum — o caso mais frequente do calendário
+
+
 def _remover_ocultos(soup: BeautifulSoup) -> BeautifulSoup:
     for oculto in soup.find_all(style=re.compile(r"display:\s*none")):
         oculto.decompose()
@@ -161,6 +178,21 @@ def montar_estilos(cor_tema: str) -> dict:
             fontSize=10.5, leading=15, spaceAfter=6, leftIndent=14,
             textColor=COR_RESPOSTA_ASSEMBLEIA),
     }
+
+
+_PADRAO_VERSICULO_INLINE = re.compile(r"(?<!\w)(\d{1,3})(?=[A-ZÀ-ÖØ-Ýa-zà-öø-ÿ])")
+
+
+def estilizar_versiculos_inline(texto: str) -> str:
+    """Destaca (cor + fonte menor, sem quebrar a leitura contínua) números
+    de versículo já colados ao início da palavra seguinte, sem espaço —
+    o padrão usual do texto bíblico impresso (ex.: '6Buscai o Senhor...
+    7Abandone o ímpio...'). Não mexe em números seguidos de espaço,
+    pontuação ou outro dígito (não são marcação de versículo)."""
+    return _PADRAO_VERSICULO_INLINE.sub(
+        lambda m: f'<font color="{COR_VERSICULO}" size="7">{m.group(1)}</font>',
+        texto,
+    )
 
 
 def paragrafo_versiculo(numero: str, texto: str, estilos: dict, cor_r: bool = False) -> Paragraph:

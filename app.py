@@ -40,7 +40,7 @@ from secoes_roteiro import SECOES
 from roteiro_completo import montar_pdf
 from roteiro_render import cor_do_tema
 
-st.set_page_config(page_title="Monte Senário", page_icon="⛪", layout="centered")
+st.set_page_config(page_title="Montesenario", page_icon="⛪", layout="centered")
 
 
 @st.cache_resource
@@ -170,7 +170,7 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
     }
 
 
-st.title("⛪ Monte Senário")
+st.title("⛪ Montesenario")
 st.caption("Consulta de leituras e orações da missa do dia")
 
 aba_consulta, aba_admin, aba_gerenciar = st.tabs(
