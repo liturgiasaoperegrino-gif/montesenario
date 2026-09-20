@@ -45,7 +45,7 @@ SCOPES = [
 
 ABA = "Liturgia_Diaria"
 CABECALHO = [
-    "DATA", "TITULO_DIA", "FONTE", "ANTIFONA_ENTRADA", "COLETA",
+    "DATA", "HORARIO", "TITULO_DIA", "FONTE", "ANTIFONA_ENTRADA", "COLETA",
     "LEITURA1_REF", "LEITURA1_TEXTO",
     "SALMO_REF", "SALMO_TEXTO",
     "LEITURA2_REF", "LEITURA2_TEXTO",
@@ -58,8 +58,23 @@ CABECALHO = [
     "SECOES_OVERRIDE",
 ]
 
+# Aba auxiliar "Horarios_Padrao" (TIPO_DIA | HORARIO) — define quais
+# horários de missa existem para cada tipo de dia (mesmo padrão já usado
+# no projeto Leitores Peregrinos). Tipos esperados:
+#   DOMINGO, SABADO, DIA_SEMANA, DIA4_SEMANA, DIA4_FDS
+# (DIA4_* cobre o dia 4 do mês — Missa da Saúde — que tem horários
+# próprios diferentes do resto da semana/fim de semana).
+ABA_HORARIOS = "Horarios_Padrao"
+CABECALHO_HORARIOS = ["TIPO_DIA", "HORARIO"]
+
+# Usado quando uma data cai num tipo de dia sem nenhum horário cadastrado
+# ainda na aba Horarios_Padrao — evita que a data simplesmente suma da
+# sincronização por falta de configuração.
+HORARIO_PADRAO_FALLBACK = "19:00"
+
 # Índices de coluna (1-based, como o gspread espera) para atualização pontual
 COL_DATA = 1
+COL_HORARIO = CABECALHO.index("HORARIO") + 1
 COL_OFERENDAS_TEXTO = CABECALHO.index("OFERENDAS_TEXTO") + 1
 COL_COMUNHAO_TEXTO = CABECALHO.index("COMUNHAO_TEXTO") + 1
 COL_FONTE_OFERENDAS_COMUNHAO = CABECALHO.index("FONTE_OFERENDAS_COMUNHAO") + 1
@@ -76,6 +91,62 @@ def _abrir_aba(cliente: gspread.Client, id_planilha: str) -> gspread.Worksheet:
         aba = planilha.add_worksheet(title=ABA, rows=1000, cols=len(CABECALHO))
         aba.append_row(CABECALHO)
     return aba
+
+
+def _abrir_aba_horarios(aba_liturgia: gspread.Worksheet) -> gspread.Worksheet:
+    """Reaproveita a mesma planilha já aberta (aba_liturgia.spreadsheet)
+    para abrir/criar a aba Horarios_Padrao, sem precisar de uma nova
+    autenticação."""
+    planilha = aba_liturgia.spreadsheet
+    try:
+        return planilha.worksheet(ABA_HORARIOS)
+    except gspread.WorksheetNotFound:
+        aba = planilha.add_worksheet(title=ABA_HORARIOS, rows=100, cols=len(CABECALHO_HORARIOS))
+        aba.append_row(CABECALHO_HORARIOS)
+        return aba
+
+
+def obter_horarios_padrao(aba_liturgia: gspread.Worksheet) -> dict[str, list[str]]:
+    """Lê a aba Horarios_Padrao e agrupa os horários cadastrados por tipo
+    de dia. Retorna {} (sem quebrar nada) se a aba estiver vazia ou algo
+    der errado na leitura."""
+    try:
+        aba_h = _abrir_aba_horarios(aba_liturgia)
+        dados = aba_h.get_all_records()
+    except Exception:
+        return {}
+    horarios_por_tipo: dict[str, list[str]] = {}
+    for r in dados:
+        tipo = str(r.get("TIPO_DIA", "")).strip().upper()
+        horario = str(r.get("HORARIO", "")).strip()
+        if tipo and horario:
+            horarios_por_tipo.setdefault(tipo, []).append(horario)
+    for tipo in horarios_por_tipo:
+        horarios_por_tipo[tipo] = sorted(set(horarios_por_tipo[tipo]))
+    return horarios_por_tipo
+
+
+def tipo_dia_de(dia: date) -> str:
+    """DOMINGO / SABADO / DIA_SEMANA, com os casos especiais do dia 4 do
+    mês (Missa da Saúde): DIA4_SEMANA (dia 4 cai de segunda a sexta) ou
+    DIA4_FDS (dia 4 cai em sábado ou domingo)."""
+    dia_semana = dia.weekday()  # segunda=0 ... domingo=6
+    eh_fds = dia_semana in (5, 6)
+    if dia.day == 4:
+        return "DIA4_FDS" if eh_fds else "DIA4_SEMANA"
+    if dia_semana == 6:
+        return "DOMINGO"
+    if dia_semana == 5:
+        return "SABADO"
+    return "DIA_SEMANA"
+
+
+def horarios_para_data(dia: date, horarios_por_tipo: dict[str, list[str]]) -> list[str]:
+    """Lista (ordenada) dos horários de missa cadastrados para essa data.
+    Devolve [] se o tipo de dia correspondente não tiver nada cadastrado
+    ainda na aba Horarios_Padrao — quem chamar decide o fallback."""
+    tipo = tipo_dia_de(dia)
+    return horarios_por_tipo.get(tipo, [])
 
 
 def conectar_planilha_com_arquivo(caminho_credenciais: str, id_planilha: str) -> gspread.Worksheet:
@@ -213,7 +284,7 @@ def buscar_oferendas_comunhao_osm(dia: date) -> Optional[dict]:
 
 # --- Escrita na planilha ------------------------------------------------
 
-def _linha_de(item: LiturgiaDoDia) -> list[str]:
+def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
     d = asdict(item)
     dia = date.fromisoformat(d["data"])
 
@@ -221,7 +292,7 @@ def _linha_de(item: LiturgiaDoDia) -> list[str]:
         # Página ainda não publicada pela fonte — grava o aviso e deixa
         # o resto em branco, em vez de inventar conteúdo ou sumir com o dia.
         return [
-            d["data"], d["titulo_dia"], "", "", "",
+            d["data"], horario, d["titulo_dia"], "", "", "",
             "", "", "", "", "", "", "", "",
             "", "", "",
             "não aplicável (fonte não confirmada)", "",
@@ -255,7 +326,7 @@ def _linha_de(item: LiturgiaDoDia) -> list[str]:
         fonte_combinada += f" (leituras) + {d['fonte_propers']} (antífona/coleta)"
 
     return [
-        d["data"], d["titulo_dia"], fonte_combinada, d["antifona_entrada"], d["coleta"],
+        d["data"], horario, d["titulo_dia"], fonte_combinada, d["antifona_entrada"], d["coleta"],
         d["leitura1_ref"], d["leitura1_texto"],
         d["salmo_ref"], d["salmo_texto"],
         d["leitura2_ref"], d["leitura2_texto"],
@@ -269,36 +340,39 @@ def _linha_de(item: LiturgiaDoDia) -> list[str]:
     ]
 
 
-def datas_ja_gravadas(aba: gspread.Worksheet) -> set[str]:
-    """Datas cujas leituras já foram confirmadas pela fonte — essas são
-    puladas em sincronizações futuras."""
+def chaves_ja_gravadas(aba: gspread.Worksheet) -> set[tuple[str, str]]:
+    """Pares (data, horário) cujas leituras já foram confirmadas pela
+    fonte — esses são pulados em sincronizações futuras."""
     valores = aba.get_all_values()
     if not valores:
         return set()
     cabecalho = valores[0]
     idx_data = cabecalho.index("DATA")
+    idx_horario = cabecalho.index("HORARIO")
     idx_confirmadas = cabecalho.index("LEITURAS_CONFIRMADAS")
     return {
-        linha[idx_data]
+        (linha[idx_data], linha[idx_horario])
         for linha in valores[1:]
         if len(linha) > idx_confirmadas and linha[idx_confirmadas] == "SIM"
     }
 
 
-def datas_pendentes(aba: gspread.Worksheet) -> dict[str, int]:
-    """Datas já gravadas mas ainda sem confirmação (fonte não publicada
-    na última tentativa) — mapeia data -> número da linha na planilha,
-    para serem sobrescritas assim que a fonte publicar."""
+def chaves_pendentes(aba: gspread.Worksheet) -> dict[tuple[str, str], int]:
+    """Pares (data, horário) já gravados mas ainda sem confirmação (fonte
+    não publicada na última tentativa) — mapeia (data, horário) -> número
+    da linha na planilha, para serem sobrescritos assim que a fonte
+    publicar."""
     valores = aba.get_all_values()
     if not valores:
         return {}
     cabecalho = valores[0]
     idx_data = cabecalho.index("DATA")
+    idx_horario = cabecalho.index("HORARIO")
     idx_confirmadas = cabecalho.index("LEITURAS_CONFIRMADAS")
     pendentes = {}
     for i, linha in enumerate(valores[1:], start=2):  # linha 1 = cabeçalho
         if len(linha) > idx_confirmadas and linha[idx_confirmadas] == "NÃO":
-            pendentes[linha[idx_data]] = i
+            pendentes[(linha[idx_data], linha[idx_horario])] = i
     return pendentes
 
 
@@ -311,43 +385,56 @@ def sincronizar_intervalo(
     """Extrai o intervalo de datas do site e grava na planilha (recebe a
     aba já autenticada — ver conectar_planilha_com_arquivo/_com_info).
 
-    Datas com LEITURAS_CONFIRMADAS=SIM são puladas (já resolvidas).
-    Datas pendentes (fonte não publicada numa tentativa anterior) são
-    RETENTADAS: se a fonte já publicou, a linha existente é atualizada
-    no lugar; se continuar sem publicar, a linha pendente não é
-    duplicada. Datas novas são adicionadas normalmente, confirmadas ou
-    não.
+    Para cada data, cria uma linha PARA CADA horário de missa cadastrado
+    na aba Horarios_Padrao (ver obter_horarios_padrao/horarios_para_data)
+    — assim domingos com 10h e 19h, ou o dia 4 com seus 2-3 horários,
+    ganham roteiros independentes, editáveis separadamente em "Gerenciar
+    Roteiro". Se o tipo de dia não tiver nenhum horário cadastrado ainda,
+    usa HORARIO_PADRAO_FALLBACK para não perder a data.
+
+    Datas/horários com LEITURAS_CONFIRMADAS=SIM são pulados (já
+    resolvidos). Pendentes (fonte não publicada numa tentativa anterior)
+    são RETENTADOS: se a fonte já publicou, a linha existente é
+    atualizada no lugar; se continuar sem publicar, a linha pendente não
+    é duplicada. Combinações novas são adicionadas normalmente,
+    confirmadas ou não.
 
     Retorna um resumo: {"novas": N, "confirmadas_agora": N, "ainda_pendentes": N}.
     """
-    ja_gravadas = set() if sobrescrever else datas_ja_gravadas(aba)
-    pendentes = {} if sobrescrever else datas_pendentes(aba)
+    horarios_por_tipo = obter_horarios_padrao(aba)
+    chaves_gravadas = set() if sobrescrever else chaves_ja_gravadas(aba)
+    pendentes = {} if sobrescrever else chaves_pendentes(aba)
 
     novas_linhas = []
     resumo = {"novas": 0, "confirmadas_agora": 0, "ainda_pendentes": 0}
 
     for item in extrair_intervalo(data_inicio, data_fim):
-        if item.data in ja_gravadas:
-            continue
+        dia = date.fromisoformat(item.data)
+        horarios = horarios_para_data(dia, horarios_por_tipo) or [HORARIO_PADRAO_FALLBACK]
 
-        linha = _linha_de(item)
+        for horario in horarios:
+            chave = (item.data, horario)
+            if chave in chaves_gravadas:
+                continue
 
-        if item.data in pendentes:
-            if item.leituras_confirmadas:
-                num_linha = pendentes[item.data]
-                ultima_coluna = rowcol_to_a1(num_linha, len(CABECALHO))
-                primeira_coluna = rowcol_to_a1(num_linha, 1)
-                aba.update(
-                    f"{primeira_coluna}:{ultima_coluna}",
-                    [linha], value_input_option="USER_ENTERED",
-                )
-                resumo["confirmadas_agora"] += 1
-            else:
-                resumo["ainda_pendentes"] += 1
-            continue
+            linha = _linha_de(item, horario)
 
-        novas_linhas.append(linha)
-        resumo["novas"] += 1
+            if chave in pendentes:
+                if item.leituras_confirmadas:
+                    num_linha = pendentes[chave]
+                    ultima_coluna = rowcol_to_a1(num_linha, len(CABECALHO))
+                    primeira_coluna = rowcol_to_a1(num_linha, 1)
+                    aba.update(
+                        f"{primeira_coluna}:{ultima_coluna}",
+                        [linha], value_input_option="USER_ENTERED",
+                    )
+                    resumo["confirmadas_agora"] += 1
+                else:
+                    resumo["ainda_pendentes"] += 1
+                continue
+
+            novas_linhas.append(linha)
+            resumo["novas"] += 1
 
     if novas_linhas:
         aba.append_rows(novas_linhas, value_input_option="USER_ENTERED")
@@ -358,19 +445,18 @@ def sincronizar_intervalo(
 def completar_oferendas_comunhao(
     aba: gspread.Worksheet,
     dia: date,
+    horario: str,
     oferendas_texto: str,
     comunhao_texto: str,
     fonte: str = "iLiturgia (colado manualmente)",
 ) -> bool:
-    """Atualiza, numa linha já existente, os campos de Oferendas/Comunhão
-    — uso típico: colar o texto copiado do app iLiturgia. Retorna False
-    se a data ainda não tiver linha na planilha (rode a sincronização
-    normal primeiro)."""
-    coluna_data = aba.col_values(COL_DATA)
-    alvo = dia.isoformat()
-    if alvo not in coluna_data:
+    """Atualiza, numa linha já existente (dessa data E horário), os campos
+    de Oferendas/Comunhão — uso típico: colar o texto copiado do app
+    iLiturgia. Retorna False se a combinação ainda não tiver linha na
+    planilha (rode a sincronização normal primeiro)."""
+    linha = _linha_da_data_horario(aba, dia, horario)
+    if linha is None:
         return False
-    linha = coluna_data.index(alvo) + 1  # 1-based, já inclui o cabeçalho
 
     aba.update_cell(linha, COL_OFERENDAS_TEXTO, oferendas_texto)
     aba.update_cell(linha, COL_COMUNHAO_TEXTO, comunhao_texto)
@@ -381,19 +467,19 @@ def completar_oferendas_comunhao(
 def salvar_prefacio_selecionado(
     aba: gspread.Worksheet,
     dia: date,
+    horario: str,
     nome_prefacio: str,
     texto_prefacio: str,
 ) -> bool:
-    """Grava, numa linha já existente, qual Prefácio foi escolhido pra
-    entrar antes da Oração Eucarística no roteiro dessa data — uso
-    típico: seleção feita na tela do app a partir dos arquivos da pasta
-    Orações Eucarísticas no Drive (ver prefacios_drive.py). Retorna
-    False se a data ainda não tiver linha na planilha."""
-    coluna_data = aba.col_values(COL_DATA)
-    alvo = dia.isoformat()
-    if alvo not in coluna_data:
+    """Grava, numa linha já existente (dessa data E horário), qual
+    Prefácio foi escolhido pra entrar antes da Oração Eucarística no
+    roteiro — uso típico: seleção feita na tela do app a partir dos
+    arquivos da pasta Orações Eucarísticas no Drive (ver
+    prefacios_drive.py). Retorna False se a combinação ainda não tiver
+    linha na planilha."""
+    linha = _linha_da_data_horario(aba, dia, horario)
+    if linha is None:
         return False
-    linha = coluna_data.index(alvo) + 1
 
     aba.update_cell(linha, COL_PREFACIO_NOME, nome_prefacio)
     aba.update_cell(linha, COL_PREFACIO_TEXTO, texto_prefacio)
@@ -409,19 +495,32 @@ def salvar_prefacio_selecionado(
 # chave no dicionário usa o conteúdo automático normalmente — isto é um
 # mecanismo de EXCEÇÃO pontual, não uma reescrita do roteiro inteiro.
 
-def _linha_da_data(aba: gspread.Worksheet, dia: date) -> Optional[int]:
-    coluna_data = aba.col_values(COL_DATA)
-    alvo = dia.isoformat()
-    if alvo not in coluna_data:
+def _linha_da_data_horario(aba: gspread.Worksheet, dia: date, horario: str) -> Optional[int]:
+    """Número da linha (1-based) cuja DATA e HORARIO batem com os
+    informados, ou None se essa combinação ainda não existir na
+    planilha."""
+    valores = aba.get_all_values()
+    if not valores:
         return None
-    return coluna_data.index(alvo) + 1  # 1-based, já inclui o cabeçalho
+    cabecalho = valores[0]
+    idx_data = cabecalho.index("DATA")
+    idx_horario = cabecalho.index("HORARIO")
+    alvo_data = dia.isoformat()
+    for i, linha in enumerate(valores[1:], start=2):
+        if (
+            len(linha) > idx_horario
+            and linha[idx_data] == alvo_data
+            and linha[idx_horario] == horario
+        ):
+            return i
+    return None
 
 
-def carregar_overrides_secoes(aba: gspread.Worksheet, dia: date) -> dict[str, str]:
-    """Lê o dicionário de overrides por seção salvo para essa data.
-    Retorna {} se a data não tiver linha ainda, se a coluna estiver vazia,
-    ou se o JSON estiver corrompido (nunca derruba a tela por isso)."""
-    linha = _linha_da_data(aba, dia)
+def carregar_overrides_secoes(aba: gspread.Worksheet, dia: date, horario: str) -> dict[str, str]:
+    """Lê o dicionário de overrides por seção salvo para essa data+horário.
+    Retorna {} se a combinação não tiver linha ainda, se a coluna estiver
+    vazia, ou se o JSON estiver corrompido (nunca derruba a tela por isso)."""
+    linha = _linha_da_data_horario(aba, dia, horario)
     if linha is None:
         return {}
     valores = aba.row_values(linha)
@@ -437,18 +536,20 @@ def carregar_overrides_secoes(aba: gspread.Worksheet, dia: date) -> dict[str, st
         return {}
 
 
-def salvar_override_secao(aba: gspread.Worksheet, dia: date, numero_secao: str, texto: str) -> bool:
+def salvar_override_secao(
+    aba: gspread.Worksheet, dia: date, horario: str, numero_secao: str, texto: str
+) -> bool:
     """Grava (ou remove, se texto vazio) o override de UMA seção para essa
-    data, sem afetar as demais seções já salvas. Retorna False se a data
-    ainda não tiver linha na planilha ou se numero_secao não for uma das
-    seções válidas (ver secoes_roteiro.SECOES)."""
+    data+horário, sem afetar as demais seções já salvas. Retorna False se
+    a combinação ainda não tiver linha na planilha ou se numero_secao não
+    for uma das seções válidas (ver secoes_roteiro.SECOES)."""
     if numero_secao not in NUMEROS_VALIDOS:
         return False
-    linha = _linha_da_data(aba, dia)
+    linha = _linha_da_data_horario(aba, dia, horario)
     if linha is None:
         return False
 
-    overrides = carregar_overrides_secoes(aba, dia)
+    overrides = carregar_overrides_secoes(aba, dia, horario)
     texto = (texto or "").strip()
     if texto:
         overrides[numero_secao] = texto

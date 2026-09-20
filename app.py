@@ -6,6 +6,12 @@ App Streamlit para consultar os textos litúrgicos (leituras + orações)
 já gravados na planilha Google Sheets, e para disparar a atualização
 sob demanda a partir do site novaalianca.com.br.
 
+Cada dia pode ter mais de um horário de missa (ex.: domingo 10h e 19h;
+dia 4 do mês com 2-3 horários) — os horários válidos para cada tipo de
+dia vêm da aba "Horarios_Padrao" da planilha (TIPO_DIA | HORARIO), e
+cada combinação DATA+HORARIO tem seu próprio roteiro, editável
+separadamente.
+
 Rodar:
     streamlit run app.py
 """
@@ -23,6 +29,9 @@ from sheets_sync import (
     salvar_prefacio_selecionado,
     carregar_overrides_secoes,
     salvar_override_secao,
+    obter_horarios_padrao,
+    horarios_para_data,
+    HORARIO_PADRAO_FALLBACK,
     SCOPES,
 )
 from prefacios_drive import conectar_drive, listar_prefacios, baixar_texto_prefacio
@@ -60,12 +69,46 @@ def carregar_dados():
     return aba.get_all_records()
 
 
-def buscar_por_data(dados: list[dict], data_alvo: date) -> dict | None:
+@st.cache_data(ttl=600)
+def carregar_horarios_padrao():
+    """{TIPO_DIA: [horarios]} lido da aba Horarios_Padrao. Cache de 10
+    min — se você editar a aba, os horários novos aparecem em até esse
+    tempo (ou na hora, se recarregar a página logo após editar, já que
+    o cache é por sessão)."""
+    return obter_horarios_padrao(conectar())
+
+
+def buscar_por_data_horario(dados: list[dict], data_alvo: date, horario: str) -> dict | None:
     alvo = data_alvo.isoformat()
     for linha in dados:
-        if linha.get("DATA") == alvo:
+        if linha.get("DATA") == alvo and linha.get("HORARIO") == horario:
             return linha
     return None
+
+
+def selecionar_horario(data_escolhida: date, key_prefix: str) -> str:
+    """Mostra (quando há mais de um) um seletor de horário de missa para
+    a data escolhida, com base na aba Horarios_Padrao. Se só houver um
+    horário cadastrado, mostra-o como texto informativo e usa-o direto.
+    Se não houver nenhum cadastrado para o tipo de dia, cai no
+    HORARIO_PADRAO_FALLBACK com um aviso."""
+    horarios_por_tipo = carregar_horarios_padrao()
+    horarios_do_dia = horarios_para_data(data_escolhida, horarios_por_tipo)
+
+    if not horarios_do_dia:
+        st.caption(
+            f"⚠ Nenhum horário cadastrado na aba 'Horarios_Padrao' para este "
+            f"tipo de dia — usando {HORARIO_PADRAO_FALLBACK} como padrão."
+        )
+        return HORARIO_PADRAO_FALLBACK
+
+    if len(horarios_do_dia) == 1:
+        st.caption(f"Horário da missa: **{horarios_do_dia[0]}**")
+        return horarios_do_dia[0]
+
+    return st.selectbox(
+        "Horário da missa", horarios_do_dia, key=f"{key_prefix}_{data_escolhida.isoformat()}"
+    )
 
 
 st.title("⛪ Monte Senário")
@@ -77,13 +120,14 @@ aba_consulta, aba_admin, aba_gerenciar = st.tabs(
 
 with aba_consulta:
     data_escolhida = st.date_input("Data da missa", value=date.today(), format="DD/MM/YYYY")
+    horario_escolhido = selecionar_horario(data_escolhida, "consulta_horario")
 
     dados = carregar_dados()
-    roteiro = buscar_por_data(dados, data_escolhida)
+    roteiro = buscar_por_data_horario(dados, data_escolhida, horario_escolhido)
 
     if not roteiro:
         st.warning(
-            "Ainda não há roteiro gravado para essa data. "
+            "Ainda não há roteiro gravado para essa data/horário. "
             "Peça a um ADM para atualizar a base na aba ao lado."
         )
     elif roteiro.get("LEITURAS_CONFIRMADAS") == "NÃO":
@@ -92,7 +136,7 @@ with aba_consulta:
             f"{roteiro.get('AVISO_FONTE', '')}"
         )
     else:
-        st.subheader(roteiro.get("TITULO_DIA", ""))
+        st.subheader(f"{roteiro.get('TITULO_DIA', '')} — {horario_escolhido}")
         if roteiro.get("AVISO_FONTE"):
             st.warning(f"⚠ {roteiro['AVISO_FONTE']}")
 
@@ -145,7 +189,12 @@ with aba_consulta:
         )
 
 with aba_admin:
-    st.write("Busca no site e grava os dias que ainda não estão na planilha.")
+    st.write(
+        "Busca no site e grava os dias que ainda não estão na planilha — "
+        "cria automaticamente uma linha para CADA horário de missa "
+        "cadastrado na aba 'Horarios_Padrao' (ver essa aba na planilha "
+        "para configurar/ajustar os horários por tipo de dia)."
+    )
     col1, col2 = st.columns(2)
     with col1:
         data_ini = st.date_input("De", value=date.today(), key="ini")
@@ -160,8 +209,8 @@ with aba_admin:
                 data_fim=data_fim,
             )
         st.success(
-            f"{resumo['novas']} dia(s) novo(s) — "
-            f"{resumo['confirmadas_agora']} confirmado(s) agora — "
+            f"{resumo['novas']} linha(s) nova(s) — "
+            f"{resumo['confirmadas_agora']} confirmada(s) agora — "
             f"{resumo['ainda_pendentes']} ainda pendente(s) (fonte não "
             f"publicada)."
         )
@@ -171,12 +220,13 @@ with aba_admin:
     st.subheader("Completar Oferendas/Comunhão")
     st.caption(
         "Para dias sem formulário próprio da OSM, cole aqui o texto "
-        "copiado do app iLiturgia (a data já precisa ter sido "
+        "copiado do app iLiturgia (a data/horário já precisa ter sido "
         "sincronizada acima)."
     )
     data_completar = st.date_input(
         "Data a completar", value=date.today(), key="data_completar"
     )
+    horario_completar = selecionar_horario(data_completar, "completar_horario")
     texto_oferendas = st.text_area("Oração sobre as Oferendas", key="txt_oferendas")
     texto_comunhao = st.text_area("Oração depois da Comunhão", key="txt_comunhao")
 
@@ -184,27 +234,29 @@ with aba_admin:
         ok = completar_oferendas_comunhao(
             conectar(),
             dia=data_completar,
+            horario=horario_completar,
             oferendas_texto=texto_oferendas,
             comunhao_texto=texto_comunhao,
         )
         if ok:
-            st.success("Orações salvas para essa data.")
+            st.success("Orações salvas para essa data/horário.")
             st.cache_data.clear()
         else:
             st.error(
-                "Essa data ainda não está na planilha — sincronize-a "
-                "primeiro em 'Atualizar base agora'."
+                "Essa data/horário ainda não está na planilha — "
+                "sincronize primeiro em 'Atualizar base agora'."
             )
 
     st.divider()
     st.subheader("Prefácio antes da Oração Eucarística")
     st.caption(
         "Escolha, entre os prefácios já enviados pra pasta 'Orações "
-        "Eucarísticas' no Drive, qual entra no roteiro deste dia."
+        "Eucarísticas' no Drive, qual entra no roteiro deste dia/horário."
     )
     data_prefacio = st.date_input(
         "Data do roteiro", value=date.today(), key="data_prefacio"
     )
+    horario_prefacio = selecionar_horario(data_prefacio, "prefacio_horario")
 
     try:
         prefacios_disponiveis = carregar_lista_prefacios()
@@ -240,16 +292,20 @@ with aba_admin:
                 ok = salvar_prefacio_selecionado(
                     conectar(),
                     dia=data_prefacio,
+                    horario=horario_prefacio,
                     nome_prefacio=nome_escolhido,
                     texto_prefacio=texto_prefacio,
                 )
             if ok:
-                st.success(f"'{nome_escolhido}' salvo no roteiro de {data_prefacio.strftime('%d/%m/%Y')}.")
+                st.success(
+                    f"'{nome_escolhido}' salvo no roteiro de "
+                    f"{data_prefacio.strftime('%d/%m/%Y')} às {horario_prefacio}."
+                )
                 st.cache_data.clear()
             else:
                 st.error(
-                    "Essa data ainda não está na planilha — sincronize-a "
-                    "primeiro em 'Atualizar base agora'."
+                    "Essa data/horário ainda não está na planilha — "
+                    "sincronize primeiro em 'Atualizar base agora'."
                 )
 
 # Para as seções que já têm conteúdo automático gravado na planilha, mostra
@@ -267,25 +323,29 @@ _COLUNA_AUTO_POR_SECAO = {
 
 with aba_gerenciar:
     st.write(
-        "Ajuste o roteiro seção por seção para uma data específica. "
-        "Cada seção mostra (quando existir) o conteúdo automático já "
-        "gravado na planilha e uma caixa para você colar/digitar um "
-        "texto próprio no lugar dele — só para esta missa. Deixe a caixa "
-        "em branco para manter o conteúdo automático (ou, na seção 02 e "
-        "na 19, para deixá-la vazia mesmo, como é o padrão)."
+        "Ajuste o roteiro seção por seção para uma data e horário "
+        "específicos. Cada seção mostra (quando existir) o conteúdo "
+        "automático já gravado na planilha e uma caixa para você "
+        "colar/digitar um texto próprio no lugar dele — só para esta "
+        "missa. Deixe a caixa em branco para manter o conteúdo automático "
+        "(ou, na seção 02 e na 19, para deixá-la vazia mesmo, como é o "
+        "padrão)."
     )
     data_gerenciar = st.date_input(
         "Data da missa a ajustar", value=date.today(), key="data_gerenciar"
     )
+    horario_gerenciar = selecionar_horario(data_gerenciar, "gerenciar_horario")
 
-    linha_gerenciar = buscar_por_data(carregar_dados(), data_gerenciar)
+    linha_gerenciar = buscar_por_data_horario(carregar_dados(), data_gerenciar, horario_gerenciar)
     if not linha_gerenciar:
         st.warning(
-            "Essa data ainda não está na planilha — sincronize-a primeiro "
-            "na aba 'Atualizar base (ADM)' antes de personalizar seções."
+            "Essa data/horário ainda não está na planilha — sincronize "
+            "primeiro na aba 'Atualizar base (ADM)' antes de personalizar "
+            "seções."
         )
     else:
-        overrides_atuais = carregar_overrides_secoes(conectar(), data_gerenciar)
+        overrides_atuais = carregar_overrides_secoes(conectar(), data_gerenciar, horario_gerenciar)
+        chave_widget = f"{data_gerenciar.isoformat()}_{horario_gerenciar}"
 
         for secao in SECOES:
             numero, nome = secao["numero"], secao["nome"]
@@ -326,13 +386,18 @@ with aba_gerenciar:
                     "Texto personalizado para esta seção (deixe em branco para usar o padrão)",
                     value=overrides_atuais.get(numero, ""),
                     height=140,
-                    key=f"override_{numero}_{data_gerenciar.isoformat()}",
+                    key=f"override_{numero}_{chave_widget}",
                 )
 
-                if st.button("Salvar esta seção", key=f"salvar_secao_{numero}_{data_gerenciar.isoformat()}"):
-                    ok = salvar_override_secao(conectar(), data_gerenciar, numero, texto_override)
+                if st.button("Salvar esta seção", key=f"salvar_secao_{numero}_{chave_widget}"):
+                    ok = salvar_override_secao(
+                        conectar(), data_gerenciar, horario_gerenciar, numero, texto_override
+                    )
                     if ok:
-                        st.success(f"Seção {numero} salva para {data_gerenciar.strftime('%d/%m/%Y')}.")
+                        st.success(
+                            f"Seção {numero} salva para "
+                            f"{data_gerenciar.strftime('%d/%m/%Y')} às {horario_gerenciar}."
+                        )
                         st.cache_data.clear()
                     else:
-                        st.error("Não foi possível salvar — verifique se a data já está sincronizada.")
+                        st.error("Não foi possível salvar — verifique se a data/horário já está sincronizado.")
