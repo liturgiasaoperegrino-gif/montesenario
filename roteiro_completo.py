@@ -1,0 +1,284 @@
+# -*- coding: utf-8 -*-
+"""
+roteiro_completo.py — Monte Senário
+
+Monta o roteiro completo da missa (20 seções, ver secoes_roteiro.py) para
+uma data específica. Módulo genérico e reaproveitável — não amarrado a
+nenhuma data — usado tanto pelos scripts de uma data específica quanto
+(no futuro) por um botão "Gerar roteiro" dentro do app.py.
+
+Duas coisas que valem destacar:
+
+1. Overrides por seção: `overrides` é um dict {"NN": "texto livre"} (ver
+   sheets_sync.carregar_overrides_secoes). Quando uma seção tem override,
+   o texto do operador substitui o conteúdo automático inteiro daquela
+   seção — usado sobretudo para a 02 (Palavras de Abertura, que fica em
+   branco por padrão: é o usuário quem escreve) e a 19 (Novenas/Reflexões),
+   mas vale para qualquer seção em caso de ajuste pontual.
+
+2. Leituras/Salmo/Evangelho aceitam DOIS formatos de dado, porque nem
+   toda fonte dá a mesma estrutura:
+   - {"versos": [(numero, texto), ...], "intro": "..."} — quando se tem o
+     HTML bruto da CNBB (cortar_secoes_cnbb + extrair_versiculos), com
+     numeração de versículo individual.
+   - {"texto_corrido": "..."} — texto já pronto, verbatim, sem numeração
+     por versículo (usado quando só se tem o texto de outra fonte, como
+     Pocket Terço/Nova Aliança via WebFetch, sem o JSON estruturado da
+     CNBB). Renderizado como parágrafo corrido, sem números vermelhos.
+"""
+
+from __future__ import annotations
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+
+import roteiro_fixo as fixo
+from roteiro_render import (
+    montar_estilos, paragrafo_versiculo, paragrafo_dialogo,
+    paragrafos_com_respostas_assembleia,
+)
+
+
+def _override_ou(overrides: dict, numero: str, padrao):
+    """Retorna o texto de override da seção `numero`, se houver, senão
+    `padrao` (que pode ser string, lista de tuplas de diálogo, etc. —
+    quem chama decide o que fazer com cada tipo)."""
+    if overrides and overrides.get(numero):
+        return overrides[numero]
+    return padrao
+
+
+def _renderizar_leitura(story, E, dados_leitura: dict, rotulo_ref_style="ref_secao"):
+    """Renderiza uma leitura/evangelho a partir do dict de dados (ver
+    docstring do módulo para os dois formatos aceitos)."""
+    if dados_leitura.get("intro"):
+        story.append(Paragraph(dados_leitura["intro"], E[rotulo_ref_style]))
+    if "versos" in dados_leitura:
+        for numero, texto in dados_leitura["versos"]:
+            story.append(paragrafo_versiculo(numero, texto, E))
+    elif dados_leitura.get("texto_corrido"):
+        for par in dados_leitura["texto_corrido"].split("\n\n"):
+            story.append(Paragraph(par.replace("\n", "<br/>"), E["corpo"]))
+
+
+def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
+    """dados: dict com todo o conteúdo do roteiro para uma data —
+    ver os scripts roteiro_20-09-2026.py / roteiro_27-09-2026.py para
+    exemplos completos de como montar esse dict a partir das fontes.
+
+    Chaves esperadas em `dados`:
+      data_iso, titulo_dia, horario_missa, cor_tema,
+      antifona_entrada, coleta,
+      leitura1_ref, leitura1 (dict — ver _renderizar_leitura),
+      salmo_ref, salmo_refrao, salmo (dict),
+      leitura2_ref, leitura2 (dict, opcional — omitir se não houver),
+      aclamacao_refrao, aclamacao_versiculo,
+      evangelho_ref, evangelho (dict), evangelho_proclamacao (texto da
+        linha "Proclamação do Evangelho ... segundo <Evangelista>"),
+      oferendas_texto, comunhao_texto,
+      prefacio_nome, prefacio_texto,
+      oracao_euc (dict {nome, motivo, texto}),
+      fontes (dict de strings para o rodapé — ver chaves usadas abaixo).
+    """
+    overrides = overrides or {}
+
+    doc = SimpleDocTemplate(
+        caminho_saida, pagesize=A4,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+        leftMargin=2.2 * cm, rightMargin=2.2 * cm,
+    )
+    E = montar_estilos(dados["cor_tema"])
+    story = []
+
+    def secao_titulo(numero, nome):
+        story.append(Paragraph(f"{numero} — {nome}", E["secao"]))
+
+    def dialogo(lista):
+        for falante, texto in lista:
+            story.append(paragrafo_dialogo(falante, texto, E))
+
+    def paragrafos_livres(texto):
+        for par in texto.split("\n\n"):
+            story.append(Paragraph(par.replace("\n", "<br/>"), E["corpo"]))
+
+    data_fmt = f"{dados['data_iso'][8:10]}/{dados['data_iso'][5:7]}/{dados['data_iso'][0:4]}"
+    horario = _override_ou(overrides, "00", dados.get("horario_missa", ""))
+
+    story.append(Paragraph("Monte Senário", E["titulo"]))
+    story.append(Paragraph(
+        f"Roteiro da Missa — {data_fmt}" + (f" — {horario}" if horario else ""),
+        E["subtitulo_data"],
+    ))
+    story.append(HRFlowable(width="100%", thickness=1, color=dados["cor_tema"], spaceAfter=10))
+    story.append(Paragraph(dados["titulo_dia"].strip(), E["dia_liturgico"]))
+
+    # 01 — Saudação
+    secao_titulo("01", "Saudação")
+    over_01 = overrides.get("01")
+    if over_01:
+        paragrafos_livres(over_01)
+    else:
+        dialogo(fixo.SAUDACAO_INICIAL)
+
+    # 02 — Palavras de Abertura: EM BRANCO por padrão — o operador escreve
+    # via interface (seção "overridable" por excelência; sem override,
+    # o roteiro mostra um aviso discreto em vez de texto genérico).
+    secao_titulo("02", "Título da Solenidade / Palavras de Abertura")
+    over_02 = overrides.get("02")
+    if over_02:
+        paragrafos_livres(over_02)
+    else:
+        story.append(Paragraph(
+            "(a preencher — use a tela \"Gerenciar Roteiro\" para inserir "
+            "o texto de abertura desta missa)", E["faltante"]
+        ))
+
+    # 03 — Ritos Iniciais
+    secao_titulo("03", "Ritos Iniciais")
+    over_03 = overrides.get("03")
+    if over_03:
+        paragrafos_livres(over_03)
+    else:
+        dialogo(fixo.RITOS_INICIAIS)
+
+    # 04 — Ato Penitencial
+    secao_titulo("04", "Ato Penitencial")
+    over_04 = overrides.get("04")
+    if over_04:
+        paragrafos_livres(over_04)
+    else:
+        dialogo(fixo.ATO_PENITENCIAL)
+
+    # 05 — Glória
+    over_05 = overrides.get("05")
+    if over_05:
+        secao_titulo("05", "Glória")
+        paragrafos_livres(over_05)
+    elif fixo.gloria_e_dita(dados["titulo_dia"]):
+        secao_titulo("05", "Glória")
+        story.append(Paragraph(fixo.GLORIA, E["corpo"]))
+
+    # 06 — Coleta
+    secao_titulo("06", "Oração da Coleta")
+    paragrafos_livres(_override_ou(overrides, "06", dados["coleta"]))
+
+    # 07 — Liturgia da Palavra (cabeçalho only, salvo override)
+    secao_titulo("07", "Liturgia da Palavra")
+    if overrides.get("07"):
+        paragrafos_livres(overrides["07"])
+
+    # 08 — Primeira Leitura
+    secao_titulo("08", f"Primeira Leitura — {dados['leitura1_ref']}")
+    if overrides.get("08"):
+        paragrafos_livres(overrides["08"])
+    else:
+        _renderizar_leitura(story, E, dados["leitura1"])
+
+    # 09 — Salmo
+    secao_titulo("09", f"Salmo Responsorial — {dados['salmo_ref']}")
+    if overrides.get("09"):
+        paragrafos_livres(overrides["09"])
+    else:
+        story.append(Paragraph(
+            f'<font color="#c62828">R.</font> {dados["salmo_refrao"]}', E["refrao"]
+        ))
+        if "versos" in dados["salmo"]:
+            for numero, texto in dados["salmo"]["versos"]:
+                story.append(paragrafo_versiculo(numero, texto, E, cor_r=True))
+        elif dados["salmo"].get("texto_corrido"):
+            for par in dados["salmo"]["texto_corrido"].split("\n\n"):
+                story.append(Paragraph(par.replace("\n", "<br/>"), E["corpo"]))
+
+    # 10 — Segunda Leitura (só se houver)
+    if overrides.get("10"):
+        secao_titulo("10", f"Segunda Leitura — {dados.get('leitura2_ref', '')}")
+        paragrafos_livres(overrides["10"])
+    elif dados.get("leitura2"):
+        secao_titulo("10", f"Segunda Leitura — {dados['leitura2_ref']}")
+        _renderizar_leitura(story, E, dados["leitura2"])
+
+    # 11 — Aclamação ao Evangelho
+    secao_titulo("11", "Aclamação ao Evangelho")
+    if overrides.get("11"):
+        paragrafos_livres(overrides["11"])
+    else:
+        story.append(Paragraph(dados.get("aclamacao_refrao") or "Aleluia, Aleluia, Aleluia.", E["corpo"]))
+        if dados.get("aclamacao_versiculo"):
+            story.append(Paragraph(dados["aclamacao_versiculo"], E["corpo"]))
+
+    # 12 — Evangelho
+    secao_titulo("12", f"Evangelho — {dados['evangelho_ref']}")
+    if overrides.get("12"):
+        paragrafos_livres(overrides["12"])
+    else:
+        dialogo(fixo.dialogo_abertura_evangelho(dados["evangelho_proclamacao"]))
+        _renderizar_leitura(story, E, dados["evangelho"])
+        dialogo(fixo.EVANGELHO_FECHAMENTO)
+
+    # 13 — Profissão de Fé
+    secao_titulo("13", "Profissão de Fé")
+    paragrafos_livres(_override_ou(overrides, "13", fixo.PROFISSAO_DE_FE))
+
+    # 14 — Liturgia Eucarística (apresentação das oferendas)
+    secao_titulo("14", "Liturgia Eucarística")
+    over_14 = overrides.get("14")
+    if over_14:
+        paragrafos_livres(over_14)
+    else:
+        dialogo(fixo.APRESENTACAO_DAS_OFERENDAS)
+
+    # 15 — Oração sobre as Oferendas
+    secao_titulo("15", "Oração sobre as Oferendas")
+    paragrafos_livres(_override_ou(overrides, "15", dados["oferendas_texto"]))
+
+    # 16 — Prefácio + Oração Eucarística (respostas da assembleia em vermelho)
+    secao_titulo("16", f"Prefácio — {dados['prefacio_nome']}")
+    if overrides.get("16"):
+        paragrafos_livres(overrides["16"])
+    else:
+        for flowable in paragrafos_com_respostas_assembleia(dados["prefacio_texto"], E):
+            story.append(flowable)
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(dados["oracao_euc"]["nome"], E["secao"]))
+        story.append(Paragraph(dados["oracao_euc"]["motivo"], E["destaque"]))
+        for flowable in paragrafos_com_respostas_assembleia(dados["oracao_euc"]["texto"], E):
+            story.append(flowable)
+
+    # 17 — Ritos da Comunhão
+    secao_titulo("17", "Ritos da Comunhão")
+    over_17 = overrides.get("17")
+    if over_17:
+        paragrafos_livres(over_17)
+    else:
+        dialogo(fixo.RITOS_DA_COMUNHAO)
+
+    # 18 — Oração após a Comunhão
+    secao_titulo("18", "Oração após a Comunhão")
+    paragrafos_livres(_override_ou(overrides, "18", dados["comunhao_texto"]))
+
+    # 19 — Novenas e Reflexões Especiais (em branco por padrão)
+    secao_titulo("19", "Novenas e Reflexões Especiais")
+    over_19 = overrides.get("19")
+    if over_19:
+        paragrafos_livres(over_19)
+    else:
+        story.append(Paragraph("Nenhuma inserida para esta data.", E["faltante"]))
+
+    # 20 — Ritos Finais e Bênção Final
+    secao_titulo("20", "Ritos Finais e Bênção Final")
+    over_20 = overrides.get("20")
+    if over_20:
+        paragrafos_livres(over_20)
+    else:
+        dialogo(fixo.RITOS_FINAIS)
+
+    # Rodapé de fontes
+    fontes = dados.get("fontes", {})
+    linhas_fonte = [f"{rotulo}: {valor}" for rotulo, valor in fontes.items() if valor]
+    linhas_fonte.append("Documento gerado pelo pipeline Monte Senário — roteiro padronizado em 20 seções.")
+    story.append(Spacer(1, 10))
+    story.append(HRFlowable(width="100%", thickness=0.5, color="#cccccc"))
+    story.append(Paragraph("<br/>".join(linhas_fonte), E["rodape"]))
+
+    doc.build(story)
