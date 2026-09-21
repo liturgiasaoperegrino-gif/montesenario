@@ -98,6 +98,87 @@ PREFACIOS = {
 }
 
 
+import re
+
+_ARABICO_PARA_ROMANO = {
+    1: "I", 2: "II", 3: "III", 4: "IV", 5: "V",
+    6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X",
+}
+
+_PADRAO_NUMERO_TITULO = re.compile(r"(\d+)[ºª]?\s*(?:Domingo|semana)", re.IGNORECASE)
+
+
+def categoria_prefacio_automatica(titulo_dia: str, tempo_liturgico: str | None, dia=None):
+    """Seção 16 — sugestão automática de Prefácio pela estação litúrgica
+    do dia (pedido explícito do usuário: "busque o prefácio conforme a
+    recomendação litúrgica, na base que está no Drive, pasta
+    'Prefácios'" — na prática, a mesma pasta 'Orações Eucarísticas' já
+    usada pela seleção manual, onde os arquivos já vêm nomeados
+    'PREFÁCIO DO ADVENTO I', 'PREFÁCIO DA QUARESMA II' etc.).
+
+    Retorna (termo_de_busca, ad_libitum) — `termo_de_busca` é o nome (ou
+    início do nome) do arquivo a localizar na pasta do Drive;
+    `ad_libitum` marca quando a escolha entre variantes é livre por
+    rubrica (não uma regra fixa), para o roteiro avisar isso ao
+    operador em vez de apresentar como regra rígida. Retorna None
+    quando não há uma correspondência confiável (cai no aviso "a
+    critério da escolha pastoral", como já era).
+
+    As regras fixas (Advento/Natal/Quaresma — datas e semanas com
+    Prefácio próprio definido no Missal) são as únicas tratadas como
+    determinísticas; Tempo Comum e a maior parte da Páscoa são ad
+    libitum por rubrica (o celebrante escolhe livremente entre as
+    opções) — a sugestão aqui é só um ponto de partida razoável, nunca
+    uma imposição, e a tela de seleção manual sempre tem prioridade."""
+    titulo = titulo_dia or ""
+    baixo = titulo.lower()
+    tl = tempo_liturgico or ""
+
+    if "semana santa" in baixo or re.search(r"(segunda|ter[çc]a|quarta)-feira santa", baixo):
+        return ("PREFÁCIO DA PAIXÃO DO SENHOR I", True)
+
+    # Epifania nem sempre traz "Natal" no próprio título (ex.: "Epifania
+    # do Senhor" simples) — checada à parte de tempo_liturgico_de, que
+    # só reconhece o Tempo do Natal pela palavra "natal" no título.
+    if "epifania" in baixo:
+        return ("PREFÁCIO DA EPIFANIA DO SENHOR", False)
+
+    if tl == "Advento":
+        if dia and dia.month == 12 and 17 <= dia.day <= 24:
+            return ("PREFÁCIO DO ADVENTO II", False)
+        return ("PREFÁCIO DO ADVENTO I", False)
+
+    if tl == "Tempo do Natal":
+        if "epifania" in baixo:
+            return ("PREFÁCIO DA EPIFANIA DO SENHOR", False)
+        return ("PREFÁCIO DO NATAL DO SENHOR I", True)
+
+    if tl == "Quaresma":
+        m = _PADRAO_NUMERO_TITULO.search(titulo)
+        semana = int(m.group(1)) if m else None
+        mapa = {1: "I", 2: "I", 3: "II", 4: "III", 5: "IV"}
+        if semana in mapa:
+            return (f"PREFÁCIO DA QUARESMA {mapa[semana]}", False)
+        return ("PREFÁCIO DA QUARESMA I", True)
+
+    if tl == "Tempo Pascal":
+        if "ascens" in baixo:
+            return ("PREFÁCIO DEPOIS DA ASCENÇÃO DO SENHOR", False)
+        if "pentecostes" in baixo:
+            return ("PREFÁCIO DE PENTECOSTES", True)
+        return ("PREFÁCIO DA PÁSCOA I", True)
+
+    if tl == "Tempo Comum":
+        m = _PADRAO_NUMERO_TITULO.search(titulo)
+        if m:
+            semana = int(m.group(1))
+            numeral = _ARABICO_PARA_ROMANO[((semana - 1) % 10) + 1]
+            return (f"PREFÁCIO DOS DOMINGOS DO TEMPO COMUM {numeral}", True)
+        return ("PREFÁCIO COMUM I", True)
+
+    return None
+
+
 def obter_prefacio(categoria: str, numeral: str = "unico") -> dict | None:
     cat = PREFACIOS.get(categoria)
     if not cat:

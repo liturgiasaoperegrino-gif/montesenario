@@ -16,6 +16,8 @@ Requisitos:
 
 from __future__ import annotations
 
+import re
+
 from googleapiclient.discovery import build
 
 # Pasta "002_Liturgia São Peregrino / Orações Eucarísticas" no Drive
@@ -53,6 +55,36 @@ def listar_prefacios(servico_drive, pasta_id: str = PASTA_ORACOES_EUCARISTICAS_I
         if not page_token:
             break
     return sorted(resultados, key=lambda x: x["nome"])
+
+
+def buscar_arquivo_por_termo(
+    servico_drive, termo: str, pasta_id: str = PASTA_ORACOES_EUCARISTICAS_ID
+) -> dict | None:
+    """Localiza, na mesma pasta usada pela seleção manual de Prefácio, o
+    arquivo cujo nome corresponde a `termo` (ex.: 'PREFÁCIO DA QUARESMA
+    II', vindo de prefacios.categoria_prefacio_automatica) — usado pela
+    sugestão automática da Seção 16. Prioriza correspondência EXATA
+    (ignorando .txt/maiúsculas/espaços); se não achar, cai para "começa
+    com o termo e o próximo caractere não é letra/número" — isso evita
+    que 'PREFÁCIO DO ADVENTO I' bata por engano em 'PREFÁCIO DO ADVENTO
+    IA' (variante à parte, só entra se pedida explicitamente). Retorna
+    None se não achar nada (o chamador cai no aviso 'a critério da
+    escolha pastoral')."""
+    candidatos = listar_prefacios(servico_drive, pasta_id)
+    termo_norm = re.sub(r"\s+", " ", termo).strip().upper()
+
+    for c in candidatos:
+        if re.sub(r"\s+", " ", c["nome"]).strip().upper() == termo_norm:
+            return c
+
+    for c in candidatos:
+        nome_norm = re.sub(r"\s+", " ", c["nome"]).strip().upper()
+        if nome_norm.startswith(termo_norm):
+            resto = nome_norm[len(termo_norm):]
+            if not resto or not resto[0].isalnum():
+                return c
+
+    return None
 
 
 def baixar_texto_prefacio(servico_drive, file_id: str) -> str:

@@ -37,6 +37,7 @@ import roteiro_fixo as fixo
 from roteiro_render import (
     montar_estilos, paragrafo_versiculo, paragrafo_dialogo,
     paragrafos_com_respostas_assembleia, estilizar_versiculos_inline,
+    COR_REFRAO,
 )
 
 
@@ -234,9 +235,20 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     else:
         dialogo([("Comentarista", fixo.CONVITE_ACLAMACAO)])
         story.append(Paragraph("Canto de Aclamação do Evangelho", E["ref_secao"]))
-        story.append(Paragraph(dados.get("aclamacao_refrao") or "Aleluia, Aleluia, Aleluia.", E["corpo"]))
+        # Estilo espelhando a fonte (Pocket Terço: "℟." = refrão, "℣." =
+        # versículo) — usando "R:"/"V:" em vez dos símbolos litúrgicos
+        # ℟/℣ porque a fonte padrão do PDF (Helvetica, sem glifos
+        # especiais registrados) não os desenha, e viravam quadradinhos
+        # pretos no lugar (bug pego em teste visual antes de entregar).
+        # Mesmo padrão "R:" em negrito já usado no Salmo (Seção 09).
+        refrao_aclamacao = dados.get("aclamacao_refrao") or "Aleluia, Aleluia, Aleluia."
+        story.append(Paragraph(
+            f'<b><font color="{COR_REFRAO}">R:</font> {refrao_aclamacao}</b>', E["corpo"]
+        ))
         if dados.get("aclamacao_versiculo"):
-            story.append(Paragraph(dados["aclamacao_versiculo"], E["corpo"]))
+            story.append(Paragraph(
+                f'<b>V:</b> {dados["aclamacao_versiculo"]}', E["corpo"]
+            ))
 
     # 12 — Evangelho
     secao_titulo("12", f"Evangelho {dados['evangelho_ref']}")

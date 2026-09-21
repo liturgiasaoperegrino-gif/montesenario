@@ -248,8 +248,13 @@ def montar_url_pocketterco(dia: date) -> str:
 def _extrair_secao_pocketterco(texto: str, inicio: str, fins: list[str]) -> str:
     # IGNORECASE por segurança — a capitalização exata do cabeçalho na
     # página pode variar ("Sobre as Oferendas" vs. "Sobre as oferendas").
+    # Ancorado só no INÍCIO da linha (sem exigir que a linha termine
+    # exatamente ali) — um "$" estrito demais deixava de bater sempre
+    # que o cabeçalho viesse com algum caractere a mais colado (":",
+    # espaço não-usual etc.), fazendo a seção inteira sumir sem motivo
+    # aparente (bug relatado pelo usuário em 21/09/2026 para a Seção 18).
     m_ini = re.search(
-        r"^" + re.escape(inicio) + r"\s*$", texto, flags=re.MULTILINE | re.IGNORECASE
+        r"^" + re.escape(inicio), texto, flags=re.MULTILINE | re.IGNORECASE
     )
     if not m_ini:
         return ""
@@ -259,7 +264,10 @@ def _extrair_secao_pocketterco(texto: str, inicio: str, fins: list[str]) -> str:
         m_fim = re.search(r"^" + re.escape(f), resto, flags=re.MULTILINE | re.IGNORECASE)
         if m_fim:
             fim = min(fim, m_fim.start())
-    return resto[:fim].strip()
+    # Tira também um eventual ":" (ou "—"/"-") colado logo após o
+    # cabeçalho, que o "^" sem "$" estrito (ver acima) deixa de fora do
+    # próprio cabeçalho — não faz parte do texto da oração.
+    return re.sub(r"^\s*[:—-]\s*", "", resto[:fim]).strip()
 
 
 def extrair_oferendas_comunhao_pocketterco(dia: date) -> Optional[dict]:
@@ -302,14 +310,28 @@ def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
     estrutural do HTML): a página NÃO tem nenhum cabeçalho "Aclamação ao
     Evangelho" — o texto salta direto da Segunda (ou Primeira) Leitura
     para o refrão/versículo soltos, marcados só pelos símbolos ℟./℣.,
-    antes do "Evangelho —". A versão anterior desta função procurava
-    por esse cabeçalho inexistente e por isso NUNCA encontrava nada,
-    para nenhuma data. Além disso, o Salmo Responsorial, mais acima,
-    também usa o símbolo ℟ (sozinho, sem ℣) no seu próprio refrão — por
-    isso a busca do ℟ de abertura da aclamação é feita a PARTIR do ℣
-    (que só existe uma vez na página, dentro da aclamação), pegando o
-    ℟ mais próximo ANTES dele, e não o primeiro ℟ do texto (que seria o
-    do Salmo)."""
+    antes do "Evangelho —".
+
+    SEGUNDO BUG REAL corrigido em 21/09/2026, relatado pelo usuário: a
+    primeira versão desta função procurava o ℣ a partir do INÍCIO da
+    página inteira. Só que a página traz o Ordinário da Missa completo,
+    não só a Liturgia da Palavra — e a saudação "℣. O Senhor esteja
+    convosco. / ℟. ..." também aparece MAIS DE UMA VEZ na página (na
+    abertura da Missa, de novo antes do Evangelho etc.), quase sempre
+    ANTES da própria Primeira Leitura. Buscar "o primeiro ℣ da página"
+    pegava essa saudação de abertura, não o versículo da aclamação — e
+    o texto extraído virava um bloco enorme (arrastando as leituras
+    inteiras no meio), que aparecia deslocado no roteiro logo depois do
+    "Graças a Deus" da 2ª Leitura.
+
+    Correção: (1) a janela de busca começa DEPOIS da última leitura
+    antes do Evangelho (Segunda Leitura, ou Primeira Leitura se não
+    houver Segunda) — nunca do topo da página; (2) a âncora principal
+    passa a ser o texto literal "Aleluia, Aleluia, Aleluia" (pedido
+    explícito do usuário), muito mais específico que os símbolos ℟/℣
+    sozinhos, que se repetem em várias saudações do Ordinário. O trecho
+    devolvido vai exatamente do "Aleluia" até (sem incluir) o
+    "Evangelho —", como pedido."""
     url = montar_url_pocketterco(dia)
     try:
         html = _baixar_html(url)
@@ -318,25 +340,43 @@ def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
         texto = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
         m_evangelho = re.search(r"^Evangelho\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
-        janela = texto[: m_evangelho.start()] if m_evangelho else texto
+        fim = m_evangelho.start() if m_evangelho else len(texto)
 
-        m_versiculo = re.search(r"℣\.?", janela)
-        if m_versiculo:
+        m_leitura2 = re.search(r"^Segunda Leitura\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
+        m_leitura1 = re.search(r"^Primeira Leitura\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
+        m_ref_anterior = m_leitura2 or m_leitura1
+        inicio_janela = m_ref_anterior.end() if m_ref_anterior else 0
+
+        janela = texto[inicio_janela:fim]
+
+        m_aleluia = re.search(r"Aleluia,?\s*Aleluia,?\s*Aleluia\.?", janela, flags=re.IGNORECASE)
+        if not m_aleluia:
+            # Fallback (raro — ex.: aclamação própria da Quaresma, sem
+            # "Aleluia"): tenta ainda assim pelos símbolos, dentro da
+            # MESMA janela já restrita (pós-leitura, pré-Evangelho).
+            m_versiculo = re.search(r"℣\.?", janela)
+            if not m_versiculo:
+                return None
             pos_refrao_ini = janela.rfind("℟", 0, m_versiculo.start())
             if pos_refrao_ini == -1:
                 return None
             refrao = re.sub(r"^℟\.?\s*", "", janela[pos_refrao_ini:m_versiculo.start()]).strip()
             versiculo = janela[m_versiculo.end():].strip()
-            # Remove eventual "℟." residual no fim (repetição do refrão,
-            # confirmada na página — ex.: "...℣. <verso> ℟.").
             versiculo = re.sub(r"\s*℟\.?\s*$", "", versiculo).strip()
-        else:
-            # Fallback para o caso (raro) de a extração de texto perder
-            # os símbolos ℟/℣ — ancora só em "Aleluia, Aleluia, Aleluia".
-            m = _PADRAO_ACLAMACAO_SEM_SIMBOLO.search(janela)
-            if not m:
+            if not refrao:
                 return None
-            refrao, versiculo = m.group(1).strip(), m.group(2).strip()
+            return {"refrao": refrao, "versiculo": versiculo, "url": url}
+
+        pos_refrao_ini = janela.rfind("℟", 0, m_aleluia.start())
+        inicio_refrao = pos_refrao_ini if pos_refrao_ini != -1 else m_aleluia.start()
+        refrao = re.sub(r"^℟\.?\s*", "", janela[inicio_refrao:m_aleluia.end()]).strip()
+
+        resto = janela[m_aleluia.end():]
+        m_versiculo = re.search(r"℣\.?\s*", resto)
+        versiculo = resto[m_versiculo.end():].strip() if m_versiculo else resto.strip()
+        # Remove eventual "℟." residual no fim (repetição do refrão,
+        # confirmada na página — ex.: "...℣. <verso> ℟.").
+        versiculo = re.sub(r"\s*℟\.?\s*$", "", versiculo).strip()
 
         if not refrao:
             return None

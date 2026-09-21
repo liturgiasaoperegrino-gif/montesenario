@@ -35,10 +35,14 @@ from sheets_sync import (
     HORARIO_PADRAO_FALLBACK,
     SCOPES,
 )
-from prefacios_drive import conectar_drive, listar_prefacios, baixar_texto_prefacio
+from prefacios_drive import (
+    conectar_drive, listar_prefacios, baixar_texto_prefacio, buscar_arquivo_por_termo,
+)
+from prefacios import categoria_prefacio_automatica
+from gcatholic_liturgia import tempo_liturgico_de
 from secoes_roteiro import SECOES
 from roteiro_completo import montar_pdf
-from roteiro_render import cor_do_tema
+from roteiro_render import cor_do_tema, limpar_texto_leitura, separar_refrao_estrofes_salmo
 from roteiro_fixo import intro_leitura, nome_evangelista
 
 st.set_page_config(page_title="Montesenario", page_icon="⛪", layout="centered")
@@ -115,7 +119,35 @@ def selecionar_horario(data_escolhida: date, key_prefix: str) -> str:
     )
 
 
-def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
+def sugerir_e_baixar_prefacio_automatico(roteiro: dict, dia: date) -> dict | None:
+    """Seção 16 — quando não há Prefácio manual nem sugestão do boletim
+    da Diocese de SJC (só domingo), busca automaticamente na pasta do
+    Drive ('Orações Eucarísticas', a mesma que o operador já usa para
+    escolher manualmente — é o que o usuário chama de pasta
+    'Prefácios', já que todo arquivo lá começa com 'PREFÁCIO') qual
+    Prefácio corresponde à estação litúrgica do dia (ver
+    prefacios.categoria_prefacio_automatica). Retorna {'nome', 'texto'}
+    ou None se não há regra confiável para o dia ou se o Drive falhar —
+    nesses casos o roteiro cai no aviso 'a critério da escolha
+    pastoral', como já era antes deste recurso."""
+    tempo = tempo_liturgico_de(roteiro.get("TITULO_DIA", "") or "")
+    sugestao = categoria_prefacio_automatica(roteiro.get("TITULO_DIA", ""), tempo, dia)
+    if not sugestao:
+        return None
+    termo_busca, _ad_libitum = sugestao
+    try:
+        arquivo = buscar_arquivo_por_termo(conectar_drive_service(), termo_busca)
+        if not arquivo:
+            return None
+        texto = baixar_texto_prefacio(conectar_drive_service(), arquivo["id"])
+        return {"nome": arquivo["nome"], "texto": texto}
+    except Exception:
+        return None
+
+
+def montar_dados_para_pdf(
+    linha: dict, horario: str, overrides: dict, sugestao_prefacio: dict | None = None
+) -> dict:
     """Converte uma linha da planilha (dict de sheets_sync) no formato de
     dados esperado por roteiro_completo.montar_pdf(). Alguns detalhes
     finos ainda não são capturados automaticamente pelo scraper geral —
@@ -128,10 +160,19 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
     leitura2_ref = linha.get("LEITURA2_REF") or ""
     evangelho_ref = linha.get("EVANGELHO_REF", "")
 
+    # A Nova Aliança/CNBB despejam o bloco inteiro de cada leitura junto
+    # com o texto — referência repetida, linha de introdução, números de
+    # versículo cada um na sua própria linha e o fechamento ("Palavra do
+    # Senhor."/"Graças a Deus.") tudo junto. limpar_texto_leitura() tira
+    # tudo isso fora (o roteiro já gera sua própria referência, intro e
+    # fechamento) — texto que já vem limpo (Pocket Terço) passa incólume.
+    leitura1_texto = limpar_texto_leitura(linha.get("LEITURA1_TEXTO", ""), leitura1_ref)
+    evangelho_texto = limpar_texto_leitura(linha.get("EVANGELHO_TEXTO", ""), evangelho_ref)
+
     leitura2 = None
     if linha.get("LEITURA2_TEXTO"):
         leitura2 = {
-            "texto_corrido": linha.get("LEITURA2_TEXTO", ""),
+            "texto_corrido": limpar_texto_leitura(linha.get("LEITURA2_TEXTO", ""), leitura2_ref),
             "intro": intro_leitura(leitura2_ref),
         }
 
@@ -151,14 +192,38 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
     # O refrão automático do Salmo (Pocket Terço) vem embutido como a
     # primeira linha de SALMO_TEXTO, marcada com "R: " (ver
     # sheets_sync._linha_de — evita precisar de mais uma coluna na
-    # planilha). Linhas antigas (sem esse recurso) não têm o marcador e
-    # seguem tratadas como texto corrido puro, como antes.
+    # planilha).
+    salmo_ref = linha.get("SALMO_REF", "")
     salmo_texto_bruto = linha.get("SALMO_TEXTO", "")
     salmo_refrao_auto = ""
     if salmo_texto_bruto.startswith("R:"):
         primeira_linha, _, resto = salmo_texto_bruto.partition("\n\n")
         salmo_refrao_auto = primeira_linha[2:].strip()
         salmo_texto_bruto = resto
+    else:
+        # Sem o marcador do Pocket Terço — é o despejo bruto da Nova
+        # Aliança/CNBB (fallback), com referência/números/fechamento
+        # junto e o refrão REPETIDO entre as estrofes (formato
+        # tradicional do saltério). Limpa o ruído e detecta o refrão
+        # pela repetição (ver separar_refrao_estrofes_salmo) em vez de
+        # deixá-lo duplicado feio no meio do texto.
+        salmo_limpo = limpar_texto_leitura(salmo_texto_bruto, salmo_ref, preservar_quebras=True)
+        salmo_refrao_auto, estrofes = separar_refrao_estrofes_salmo(salmo_limpo)
+        salmo_texto_bruto = "\n\n".join(f"- {e}" for e in estrofes)
+
+    # Prefácio (Seção 16): manual (tela dedicada) > sugestão automática
+    # do boletim da Diocese de SJC (só domingo, já vem em
+    # PREFACIO_NOME/TEXTO) > sugestão automática pela estação litúrgica
+    # a partir da pasta do Drive (`sugestao_prefacio`, calculada por
+    # quem chama esta função — ver sugerir_e_baixar_prefacio_automatico)
+    # > aviso "a critério da escolha pastoral", se nada bateu.
+    prefacio_nome = linha.get("PREFACIO_NOME", "")
+    prefacio_texto = linha.get("PREFACIO_TEXTO", "")
+    fonte_prefacio = "Google Drive — Orações Eucarísticas" if prefacio_nome else ""
+    if not prefacio_nome and sugestao_prefacio:
+        prefacio_nome = sugestao_prefacio.get("nome", "")
+        prefacio_texto = sugestao_prefacio.get("texto", "")
+        fonte_prefacio = "Google Drive — Prefácios (sugestão automática pela liturgia)"
 
     return {
         "data_iso": linha["DATA"],
@@ -169,10 +234,10 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
         "coleta": linha.get("COLETA", ""),
         "leitura1_ref": leitura1_ref,
         "leitura1": {
-            "texto_corrido": linha.get("LEITURA1_TEXTO", ""),
+            "texto_corrido": leitura1_texto,
             "intro": intro_leitura(leitura1_ref),
         },
-        "salmo_ref": linha.get("SALMO_REF", ""),
+        "salmo_ref": salmo_ref,
         "salmo_refrao": overrides.get("09_refrao") or salmo_refrao_auto,
         "salmo": {"texto_corrido": salmo_texto_bruto},
         "leitura2_ref": leitura2_ref or None,
@@ -181,12 +246,12 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
         "aclamacao_versiculo": linha.get("ACLAMACAO_VERSICULO") or None,
         "evangelho_ref": evangelho_ref,
         "evangelho_proclamacao": evangelho_proclamacao,
-        "evangelho": {"texto_corrido": linha.get("EVANGELHO_TEXTO", "")},
+        "evangelho": {"texto_corrido": evangelho_texto},
         "palavras_abertura": linha.get("PALAVRAS_ABERTURA", ""),
         "oferendas_texto": linha.get("OFERENDAS_TEXTO", ""),
         "comunhao_texto": linha.get("COMUNHAO_TEXTO", ""),
-        "prefacio_nome": linha.get("PREFACIO_NOME", "") or "a critério da escolha pastoral",
-        "prefacio_texto": linha.get("PREFACIO_TEXTO", ""),
+        "prefacio_nome": prefacio_nome or "a critério da escolha pastoral",
+        "prefacio_texto": prefacio_texto,
         "oracao_euc": {
             "nome": nome_oracao,
             "motivo": motivo_oracao,
@@ -195,7 +260,7 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
         "fontes": {
             "Fonte das leituras": linha.get("FONTE", ""),
             "Fonte de Oferendas/Comunhão": linha.get("FONTE_OFERENDAS_COMUNHAO", ""),
-            "Fonte do Prefácio": "Google Drive — Orações Eucarísticas" if linha.get("PREFACIO_NOME") else "",
+            "Fonte do Prefácio": fonte_prefacio,
             "URL da fonte principal": linha.get("URL_FONTE", ""),
         },
     }
@@ -282,7 +347,10 @@ with aba_consulta:
         if st.button("📄 Gerar PDF do roteiro completo (20 seções)"):
             with st.spinner("Montando o PDF..."):
                 overrides = carregar_overrides_secoes(conectar(), data_escolhida, horario_escolhido)
-                dados_pdf = montar_dados_para_pdf(roteiro, horario_escolhido, overrides)
+                sugestao_prefacio = None
+                if not roteiro.get("PREFACIO_NOME"):
+                    sugestao_prefacio = sugerir_e_baixar_prefacio_automatico(roteiro, data_escolhida)
+                dados_pdf = montar_dados_para_pdf(roteiro, horario_escolhido, overrides, sugestao_prefacio)
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                     montar_pdf(tmp.name, dados_pdf, overrides=overrides)
                     caminho_pdf = tmp.name

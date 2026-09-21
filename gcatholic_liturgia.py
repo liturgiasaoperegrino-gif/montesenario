@@ -130,6 +130,14 @@ def _tempo_liturgico_de(titulo: str) -> Optional[str]:
     return None
 
 
+# Alias público — _tempo_liturgico_de nasceu como detalhe interno deste
+# módulo, mas passou a ser reaproveitado por prefacios.py (sugestão
+# automática de Prefácio pela estação litúrgica, Seção 16) a partir do
+# TITULO_DIA já gravado na planilha, sem precisar rebaixar o feed .ics
+# de novo.
+tempo_liturgico_de = _tempo_liturgico_de
+
+
 def _desfazer_quebras_ics(texto_ics: str) -> list[str]:
     """O formato .ics 'dobra' linhas longas com uma quebra de linha
     seguida de um espaço/tab (RFC 5545 — 'line folding'). Desfaz isso
