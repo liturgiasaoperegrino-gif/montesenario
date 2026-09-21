@@ -35,6 +35,7 @@ from google.oauth2.service_account import Credentials
 
 from scraper import LiturgiaDoDia, extrair_intervalo, extrair_oferendas_comunhao_pocketterco
 from osm_proprio import buscar_formulario_osm
+from palavras_abertura_sjc import obter_conteudo_boletim
 from oracoes_eucaristicas import obter_oracao
 from secoes_roteiro import NUMEROS_VALIDOS
 from roteiro_render import inferir_cor_liturgica
@@ -322,6 +323,19 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
             oferendas_texto = dados_pocketterco["oferendas"]
             comunhao_texto = dados_pocketterco["comunhao"]
             fonte_extra = f"Pocket Terço ({dados_pocketterco['url']})"
+        else:
+            # Nem OSM nem Pocket Terço têm essa data (comum em domingos
+            # do Tempo Comum sem oração própria destacada nessas
+            # fontes) — último fallback: o mesmo boletim dominical da
+            # Diocese de SJC já usado para Aclamação/Prefácio (só
+            # domingo) também numera "ORAÇÃO SOBRE AS OFERENDAS" e
+            # "ORAÇÃO DEPOIS DA COMUNHÃO" — ver
+            # palavras_abertura_sjc._extrair_oferendas/_extrair_comunhao.
+            boletim = obter_conteudo_boletim(dia)
+            if boletim and (boletim["oferendas_texto"] or boletim["comunhao_texto"]):
+                oferendas_texto = boletim["oferendas_texto"]
+                comunhao_texto = boletim["comunhao_texto"]
+                fonte_extra = f"Diocese de SJC ({boletim['url']})"
 
     # Prefácio: sugestão automática (Diocese de SJC, só domingo) já vai
     # direto para PREFACIO_NOME/TEXTO — a tela "Prefácio antes da

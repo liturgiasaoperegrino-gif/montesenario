@@ -248,8 +248,22 @@ def montar_dados_para_pdf(
         "evangelho_proclamacao": evangelho_proclamacao,
         "evangelho": {"texto_corrido": evangelho_texto},
         "palavras_abertura": linha.get("PALAVRAS_ABERTURA", ""),
-        "oferendas_texto": linha.get("OFERENDAS_TEXTO", ""),
-        "comunhao_texto": linha.get("COMUNHAO_TEXTO", ""),
+        # Sem isso, uma data sem nenhuma fonte automática (OSM, Pocket
+        # Terço nem boletim de SJC) ficava com a Seção 15/18 em branco,
+        # sem explicação nenhuma — parecendo um bug ("seção não
+        # capturada") em vez do que realmente é (nenhuma fonte tinha
+        # essa oração pra esse dia específico). Mesmo padrão já usado
+        # no Prefácio ("a critério da escolha pastoral").
+        "oferendas_texto": linha.get("OFERENDAS_TEXTO") or (
+            "(nenhuma fonte automática encontrou esta oração para esta "
+            "data — preencha em 'Completar Oferendas/Comunhão' ou em "
+            "'Gerenciar Roteiro', Seção 15)"
+        ),
+        "comunhao_texto": linha.get("COMUNHAO_TEXTO") or (
+            "(nenhuma fonte automática encontrou esta oração para esta "
+            "data — preencha em 'Completar Oferendas/Comunhão' ou em "
+            "'Gerenciar Roteiro', Seção 18)"
+        ),
         "prefacio_nome": prefacio_nome or "a critério da escolha pastoral",
         "prefacio_texto": prefacio_texto,
         "oracao_euc": {

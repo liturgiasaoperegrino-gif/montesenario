@@ -190,6 +190,28 @@ def _extrair_aclamacao(texto_pdf: str) -> dict:
     return {"refrao": m.group(1).strip(), "versiculo": m.group(2).strip()}
 
 
+def _extrair_oferendas(texto_pdf: str) -> str:
+    """Texto da seção 'ORAÇÃO SOBRE AS OFERENDAS' do boletim — usada
+    como fallback (Seção 15) quando nem o OSM nem o Pocket Terço têm
+    essa oração para a data. Levanta ValueError se a seção não existir
+    (o chamador trata isso como 'esta fonte também não tem')."""
+    bloco = _isolar_secao(texto_pdf, r"ORA[ÇC][ÃA]O\s+SOBRE\s+AS\s+OFERENDAS")
+    if not bloco:
+        raise ValueError("seção 'ORAÇÃO SOBRE AS OFERENDAS' não encontrada")
+    return re.sub(r"\s+", " ", bloco).strip()
+
+
+def _extrair_comunhao(texto_pdf: str) -> str:
+    """Texto da seção 'ORAÇÃO DEPOIS/APÓS DA COMUNHÃO' do boletim —
+    usada como fallback (Seção 18) quando nem o OSM nem o Pocket Terço
+    têm essa oração para a data. Levanta ValueError se a seção não
+    existir."""
+    bloco = _isolar_secao(texto_pdf, r"ORA[ÇC][ÃA]O\s+(DEPOIS|AP[ÓO]S)\s+DA\s+COMUNH[ÃA]O")
+    if not bloco:
+        raise ValueError("seção 'ORAÇÃO DEPOIS/APÓS DA COMUNHÃO' não encontrada")
+    return re.sub(r"\s+", " ", bloco).strip()
+
+
 def _extrair_prefacio(texto_pdf: str) -> dict:
     """{'nome': str, 'texto': str} a partir da seção 'ORAÇÃO
     EUCARÍSTICA' do boletim — confirmado por inspeção manual em
@@ -220,9 +242,77 @@ def _extrair_prefacio(texto_pdf: str) -> dict:
     return {"nome": m_nome.group(1).strip(), "texto": texto_prefacio}
 
 
+def _agrupar_em_linhas(palavras: list, tolerancia: float = 3.0) -> list:
+    """Agrupa uma lista de palavras (dicts do pdfplumber, com 'top' e
+    'x0') em linhas — palavras cujo topo difere por até `tolerancia`
+    pontos entram na mesma linha (nem toda palavra de uma linha tem o
+    'top' idêntico bit a bit, por causa de fontes/kerning). Cada linha
+    volta ordenada da esquerda pra direita."""
+    if not palavras:
+        return []
+    ordenadas = sorted(palavras, key=lambda p: p["top"])
+    linhas, linha_atual, referencia = [], [], None
+    for p in ordenadas:
+        if referencia is None or abs(p["top"] - referencia) <= tolerancia:
+            linha_atual.append(p)
+            if referencia is None:
+                referencia = p["top"]
+        else:
+            linhas.append(linha_atual)
+            linha_atual, referencia = [p], p["top"]
+    if linha_atual:
+        linhas.append(linha_atual)
+    return [sorted(l, key=lambda p: p["x0"]) for l in linhas]
+
+
+def _extrair_texto_pagina_pdf(page) -> str:
+    """Extrai o texto de UMA página respeitando um possível layout em
+    DUAS COLUNAS — comum em boletins paroquiais/diocesanos (a
+    'folhinha' impressa, pra economizar papel). O `page.extract_text()`
+    padrão do pdfplumber ordena as palavras primeiro pela posição
+    vertical e só depois pela horizontal: numa página de duas colunas
+    isso INTERCALA o texto das duas colunas linha a linha (frase da
+    esquerda, frase da direita, frase da esquerda...), produzindo uma
+    bagunça — bug real relatado pelo usuário em 21/09/2026: corrompia a
+    Aclamação (fallback deste boletim) e o Prefácio (Seção 16, único
+    automatismo, também extraído daqui), misturando o texto litúrgico
+    com avisos/orações de outra coluna da página.
+
+    Detecção: separa as palavras pela metade da largura da página: só
+    trata como "duas colunas de verdade" quando praticamente todas as
+    palavras caem claramente de um lado ou do outro (não espalhadas
+    pelo meio, como seria um título centralizado) E existe uma lacuna
+    horizontal real entre o fim de uma metade e o início da outra. Sem
+    essas duas condições, é mais seguro assumir coluna única e usar o
+    texto corrido normal do pdfplumber, sem risco de cortar uma página
+    de uma coluna só ao meio."""
+    palavras = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+    if not palavras:
+        return page.extract_text() or ""
+
+    meio = page.width / 2
+    esquerda = [p for p in palavras if p["x1"] <= meio]
+    direita = [p for p in palavras if p["x0"] >= meio]
+
+    classificadas = len(esquerda) + len(direita)
+    if not esquerda or not direita or classificadas < 0.9 * len(palavras):
+        return page.extract_text() or ""
+
+    lacuna = min(p["x0"] for p in direita) - max(p["x1"] for p in esquerda)
+    if lacuna < page.width * 0.03:
+        return page.extract_text() or ""
+
+    def _texto_da_coluna(palavras_coluna):
+        linhas = _agrupar_em_linhas(palavras_coluna)
+        return "\n".join(" ".join(p["text"] for p in linha) for linha in linhas)
+
+    return _texto_da_coluna(esquerda) + "\n" + _texto_da_coluna(direita)
+
+
 def _baixar_texto_pdf(dia: date) -> Optional[str]:
     """Acha e baixa o PDF do domingo pedido, devolvendo o texto já
-    extraído (pdfplumber) — ou None se não achar o PDF ou a
+    extraído (pdfplumber, com detecção de duas colunas — ver
+    _extrair_texto_pagina_pdf) — ou None se não achar o PDF ou a
     biblioteca/rede falhar. Isolado para ser baixado UMA VEZ só e
     reaproveitado por todas as extrações (introdução, aclamação,
     prefácio)."""
@@ -235,7 +325,7 @@ def _baixar_texto_pdf(dia: date) -> Optional[str]:
         resp = requests.get(url_pdf, headers=HEADERS, timeout=30)
         resp.raise_for_status()
         with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
-            texto = "\n".join((p.extract_text() or "") for p in pdf.pages)
+            texto = "\n".join(_extrair_texto_pagina_pdf(p) for p in pdf.pages)
         return texto, url_pdf
     except Exception:
         return None
@@ -260,6 +350,8 @@ def obter_conteudo_boletim(dia: date) -> Optional[dict]:
         "aclamacao_versiculo": "",
         "prefacio_nome": "",
         "prefacio_texto": "",
+        "oferendas_texto": "",
+        "comunhao_texto": "",
     }
     try:
         saida["introducao"] = _extrair_introducao(texto_pdf)
@@ -275,6 +367,14 @@ def obter_conteudo_boletim(dia: date) -> Optional[dict]:
         prefacio = _extrair_prefacio(texto_pdf)
         saida["prefacio_nome"] = prefacio["nome"]
         saida["prefacio_texto"] = prefacio["texto"]
+    except Exception:
+        pass
+    try:
+        saida["oferendas_texto"] = _extrair_oferendas(texto_pdf)
+    except Exception:
+        pass
+    try:
+        saida["comunhao_texto"] = _extrair_comunhao(texto_pdf)
     except Exception:
         pass
     return saida
