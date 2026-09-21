@@ -308,34 +308,59 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
             "{}",
         ]
 
-    oferendas_texto, comunhao_texto, fonte_extra = "", "", ""
+    # BUG REAL corrigido em 21/09/2026 (relatado pelo usuário): a versão
+    # anterior tratava Oferendas e Comunhão como um BLOCO ÚNICO por
+    # fonte — se o Pocket Terço achasse só uma das duas (a outra vindo
+    # vazia por qualquer motivo pontual daquele dia), a fonte seguinte
+    # (boletim da Diocese de SJC) nunca era consultada para a que
+    # faltou, mesmo tendo essa oração disponível. Agora cada seção
+    # (15/18) busca a PRÓPRIA fonte de forma independente, na mesma
+    # ordem de prioridade de antes: OSM (datas fixas) > Pocket Terço >
+    # boletim da Diocese de SJC — este último por último e só se faltar
+    # algo, por decisão do usuário: é a fonte menos confiável das três
+    # (vem de PDF em duas colunas, sujeito a mistura de colunas — ver
+    # palavras_abertura_sjc._extrair_texto_pagina_pdf).
+    oferendas_texto, comunhao_texto = "", ""
+    fonte_oferendas, fonte_comunhao = "", ""
+
     dados_osm = buscar_oferendas_comunhao_osm(dia)
     if dados_osm:
-        oferendas_texto = dados_osm["oferendas_texto"]
-        comunhao_texto = dados_osm["comunhao_texto"]
-        fonte_extra = f"OSM — {dados_osm['celebracao']} ({dados_osm['url_pdf']})"
-    else:
-        # OSM só cobre datas fixas da Ordem; para o resto do ano, o
-        # Pocket Terço é a fonte dessas duas orações (decisão do usuário:
-        # só para Oferendas/Comunhão, o resto do pipeline não muda).
+        if dados_osm.get("oferendas_texto"):
+            oferendas_texto = dados_osm["oferendas_texto"]
+            fonte_oferendas = f"OSM — {dados_osm['celebracao']} ({dados_osm['url_pdf']})"
+        if dados_osm.get("comunhao_texto"):
+            comunhao_texto = dados_osm["comunhao_texto"]
+            fonte_comunhao = f"OSM — {dados_osm['celebracao']} ({dados_osm['url_pdf']})"
+
+    if not oferendas_texto or not comunhao_texto:
         dados_pocketterco = extrair_oferendas_comunhao_pocketterco(dia)
         if dados_pocketterco:
-            oferendas_texto = dados_pocketterco["oferendas"]
-            comunhao_texto = dados_pocketterco["comunhao"]
-            fonte_extra = f"Pocket Terço ({dados_pocketterco['url']})"
-        else:
-            # Nem OSM nem Pocket Terço têm essa data (comum em domingos
-            # do Tempo Comum sem oração própria destacada nessas
-            # fontes) — último fallback: o mesmo boletim dominical da
-            # Diocese de SJC já usado para Aclamação/Prefácio (só
-            # domingo) também numera "ORAÇÃO SOBRE AS OFERENDAS" e
-            # "ORAÇÃO DEPOIS DA COMUNHÃO" — ver
-            # palavras_abertura_sjc._extrair_oferendas/_extrair_comunhao.
-            boletim = obter_conteudo_boletim(dia)
-            if boletim and (boletim["oferendas_texto"] or boletim["comunhao_texto"]):
+            if not oferendas_texto and dados_pocketterco.get("oferendas"):
+                oferendas_texto = dados_pocketterco["oferendas"]
+                fonte_oferendas = f"Pocket Terço ({dados_pocketterco['url']})"
+            if not comunhao_texto and dados_pocketterco.get("comunhao"):
+                comunhao_texto = dados_pocketterco["comunhao"]
+                fonte_comunhao = f"Pocket Terço ({dados_pocketterco['url']})"
+
+    if not oferendas_texto or not comunhao_texto:
+        boletim = obter_conteudo_boletim(dia)
+        if boletim:
+            if not oferendas_texto and boletim.get("oferendas_texto"):
                 oferendas_texto = boletim["oferendas_texto"]
+                fonte_oferendas = f"Diocese de SJC ({boletim['url']})"
+            if not comunhao_texto and boletim.get("comunhao_texto"):
                 comunhao_texto = boletim["comunhao_texto"]
-                fonte_extra = f"Diocese de SJC ({boletim['url']})"
+                fonte_comunhao = f"Diocese de SJC ({boletim['url']})"
+
+    if fonte_oferendas and fonte_oferendas == fonte_comunhao:
+        fonte_extra = fonte_oferendas
+    else:
+        partes_fonte = []
+        if fonte_oferendas:
+            partes_fonte.append(f"Oferendas: {fonte_oferendas}")
+        if fonte_comunhao:
+            partes_fonte.append(f"Comunhão: {fonte_comunhao}")
+        fonte_extra = " | ".join(partes_fonte)
 
     # Prefácio: sugestão automática (Diocese de SJC, só domingo) já vai
     # direto para PREFACIO_NOME/TEXTO — a tela "Prefácio antes da

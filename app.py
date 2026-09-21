@@ -176,9 +176,13 @@ def montar_dados_para_pdf(
     # duplicada dentro do próprio texto bíblico da fonte — o roteiro já
     # insere essa moldura sozinho, com texto fixo (ver
     # roteiro_fixo.dialogo_abertura_evangelho), logo antes do corpo do
-    # Evangelho.
+    # Evangelho. `evangelista` (calculado já aqui, não só mais abaixo)
+    # ancora o corte no nome real do evangelista do dia — mais confiável
+    # que o símbolo (†/✠/nenhum) que a fonte usa antes do nome, e
+    # tolerante a quebra de linha entre "Jesus Cristo" e o nome.
+    evangelista = nome_evangelista(evangelho_ref)
     evangelho_texto = limpar_texto_leitura(
-        linha.get("EVANGELHO_TEXTO", ""), evangelho_ref, eh_evangelho=True
+        linha.get("EVANGELHO_TEXTO", ""), evangelho_ref, eh_evangelho=True, evangelista=evangelista
     )
 
     leitura2 = None
@@ -188,7 +192,6 @@ def montar_dados_para_pdf(
             "intro": intro_leitura(leitura2_ref),
         }
 
-    evangelista = nome_evangelista(evangelho_ref)
     evangelho_proclamacao = (
         f"Proclamação do Evangelho de Jesus Cristo † segundo {evangelista}."
         if evangelista

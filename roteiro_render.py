@@ -238,33 +238,109 @@ _PADRAO_LINHA_NUMERO_VERSICULO = re.compile(r"^\d{1,3}[a-zà-ÿ]{0,3}\.?$", re.I
 # quantidades etc.), que nunca abrem a linha sozinhos assim.
 _PADRAO_PREFIXO_VERSICULO_LINHA = re.compile(r"^\d{1,3}[a-zà-ÿ]{0,3}\.?\s+(?=\S)", re.IGNORECASE)
 _PADRAO_LINHA_INTRO_LEITURA = re.compile(r"^Leitura\s+(da|do|de)\b", re.IGNORECASE)
-_PADRAO_LINHA_FECHAMENTO = re.compile(
-    r"^(Palavra do Senhor\.?|Gra[çc]as a Deus\.?|Palavra da Salva[çc][ãa]o\.?|"
-    r"Gl[óo]ria a [Vv][óo]s,?\s*Senhor\.?|O Senhor esteja convosco\.?|"
-    r"Ele est[áa] no meio de n[óo]s\.?|Proclama[çc][ãa]o do Evangelho\b.*)$",
+
+# BUG REAL encontrado em 21/09/2026 (5ª rodada, por simulação com texto
+# real do Drive): a fonte às vezes junta o fechamento inteiro numa linha
+# só, com rótulo de falante colado ("...não morrerá”. Todos: Graças a
+# Deus.") ou prefixa a resposta com "Todos:" — um "^...$" exigindo a
+# linha ser EXATAMENTE "Graças a Deus." não reconhece nenhum desses
+# casos, e a resposta acaba colada ao final do texto bíblico (e ainda
+# duplicada, já que o roteiro insere seu próprio diálogo de fechamento
+# fixo logo depois). Por isso a checagem agora não é mais um regex de
+# linha inteira: verifica se, tirando os rótulos de falante (Padre:/
+# Celebrante:/Todos:) e as frases fixas conhecidas, não sobra nada de
+# verdade na linha — funciona em qualquer combinação/ordem delas.
+_FRASES_FECHAMENTO = [
+    r"Palavra do Senhor",
+    r"Palavra da Salva[çc][ãa]o",
+    r"Gra[çc]as a Deus",
+    r"Gl[óo]ria a [Vv][óo]s,?\s*Senhor",
+    r"O Senhor esteja convosco",
+    r"Ele est[áa] no meio de n[óo]s",
+]
+_PADRAO_FRASE_FECHAMENTO = re.compile("(?:" + "|".join(_FRASES_FECHAMENTO) + ")", re.IGNORECASE)
+_PADRAO_LABEL_FALANTE = re.compile(r"(?:padre|celebrante|todos)\s*:", re.IGNORECASE)
+_PADRAO_SOBRA_PONTUACAO = re.compile(r"[\s.,!:;–—-]+")
+
+
+def _linha_e_so_fechamento(linha: str) -> bool:
+    """True quando a linha inteira é composta só por rótulos de falante
+    (Padre:/Celebrante:/Todos:) e/ou frases fixas de fechamento/saudação
+    ('Palavra do Senhor.', 'Graças a Deus.' etc.) — em qualquer
+    combinação, ordem ou pontuação. O roteiro já gera essas linhas
+    sozinho (diálogo fixo), então uma ocorrência vinda da fonte é
+    sempre descartada por ser duplicata."""
+    if not _PADRAO_FRASE_FECHAMENTO.search(linha):
+        return False
+    sem_labels = _PADRAO_LABEL_FALANTE.sub("", linha)
+    sem_frases = _PADRAO_FRASE_FECHAMENTO.sub("", sem_labels)
+    sobra = _PADRAO_SOBRA_PONTUACAO.sub("", sem_frases)
+    return not sobra
+
+
+# Mesmo bug, variante mais sutil: o fechamento vem COLADO ao final da
+# última frase real do texto bíblico, não em linha própria (ex.:
+# '...não morrerá”. Todos: Graças a Deus.') — nesse caso a linha
+# inteira NÃO é só fechamento (tem texto de verdade antes), então
+# _linha_e_so_fechamento (acima) corretamente não a descarta inteira,
+# mas o SUFIXO precisa ser cortado à parte. Cobre até duas frases
+# fixas seguidas (ex.: 'Palavra do Senhor. Todos: Graças a Deus.').
+_PADRAO_SUFIXO_FECHAMENTO = re.compile(
+    r"\s*(?:(?:padre|celebrante|todos)\s*:?\s*)?(?:" + "|".join(_FRASES_FECHAMENTO) + r")\.?\s*"
+    r"(?:(?:todos\s*:?\s*)?(?:" + "|".join(_FRASES_FECHAMENTO) + r")\.?\s*)?$",
     re.IGNORECASE,
 )
+
+
 _PADRAO_OU_MAIS_BREVE = re.compile(r"^ou\s+mais\s+breve$", re.IGNORECASE)
 
-# BUG REAL encontrado em 21/09/2026 (3ª rodada): a fonte do Evangelho
-# despeja, junto com o texto bíblico, a própria saudação/proclamação do
-# celebrante ("Padre: O Senhor esteja convosco Todos: Ele está no meio
-# de nós" / "Proclamação do Evangelho de Jesus Cristo † segundo Mateus.
-# Todos: Glória a vós, Senhor") — que o roteiro já insere sozinho, com
-# texto fixo do Ordinário da Missa, ANTES do corpo do Evangelho (ver
-# roteiro_fixo.dialogo_abertura_evangelho). Sem isso, essa saudação saía
-# duplicada e misturada ao texto bíblico. Usadas só quando
-# `eh_evangelho=True` — não têm por que bater em leitura 1/2.
+# BUG REAL encontrado em 21/09/2026 (3ª e 4ª rodadas): a fonte do
+# Evangelho despeja, junto com o texto bíblico, a própria saudação/
+# proclamação do celebrante ("Padre: O Senhor esteja convosco Todos:
+# Ele está no meio de nós" / "Proclamação do Evangelho de Jesus Cristo
+# † segundo Mateus. Todos: Glória a vós, Senhor") — que o roteiro já
+# insere sozinho, com texto fixo do Ordinário da Missa, ANTES do corpo
+# do Evangelho (ver roteiro_fixo.dialogo_abertura_evangelho). Sem isso,
+# essa saudação saía duplicada e misturada ao texto bíblico.
+#
+# 1ª tentativa (comparar LINHA POR LINHA) falhou num caso real: a fonte
+# quebra a linha logo depois de "Jesus Cristo", deixando "✠ segundo
+# Mateus" colado ao INÍCIO da linha seguinte, que já é o começo do
+# texto bíblico de verdade ("✠ segundo Mateus Naquele tempo, Jesus
+# disse...") — como essa linha não é IGUAL à proclamação inteira, não
+# batia em nenhum padrão e sobrava como resíduo.
+#
+# Correção: em vez de exigir que a proclamação ocupe uma linha inteira,
+# ancora a busca no NOME DO EVANGELISTA do dia (já conhecido pela
+# referência bíblica — ver roteiro_fixo.nome_evangelista), aplicada ao
+# texto INTEIRO (não linha por linha, então sobrevive a qualquer quebra
+# de linha no meio) e tolerante a qualquer símbolo usado antes do nome
+# (†, ✠, ou nenhum). Usadas só quando `eh_evangelho=True` — não têm por
+# que bater em leitura 1/2.
 _PADRAO_SAUDACAO_EVANGELHO = re.compile(
-    r"^(?:padre|celebrante)?\s*:?\s*o\s+senhor\s+esteja\s+convosco[.!]?\s*"
-    r"(?:todos\s*:?\s*)?(?:ele\s+est[áa]\s+no\s+meio\s+de\s+n[óo]s[.!]?)?\s*$",
+    r"(?:padre|celebrante)?\s*:?\s*o\s+senhor\s+esteja\s+convosco[.!]?\s*"
+    r"(?:todos\s*:?\s*)?(?:ele\s+est[áa]\s+no\s+meio\s+de\s+n[óo]s[.!]?)?",
     re.IGNORECASE,
 )
-_PADRAO_PROCLAMACAO_EVANGELHO_LINHA = re.compile(
-    r"^proclama[çc][ãa]o\s+do\s+evangelho\s+de\s+jesus\s+cristo\b[^\n]*?"
-    r"(?:todos\s*:?\s*)?(?:gl[óo]ria\s+a\s+v[óo]s,?\s*senhor[.!]?)?\s*$",
-    re.IGNORECASE,
-)
+
+
+def _padrao_proclamacao_evangelho(evangelista: str = "") -> re.Pattern:
+    """Monta o padrão que remove o bloco 'Proclamação do Evangelho de
+    Jesus Cristo [símbolo] segundo <Evangelista>[.] [Todos: Glória a
+    vós, Senhor]' do texto inteiro (não por linha) — tolerante a
+    qualquer quebra de linha ou símbolo (†/✠/nenhum) entre 'Cristo' e o
+    nome do evangelista. Quando o nome do evangelista é conhecido,
+    ancora nele (mais confiável); senão, cai numa janela curta após
+    'Cristo' até o primeiro ponto final."""
+    if evangelista:
+        meio = r"[\s\S]{0,20}?" + re.escape(evangelista)
+    else:
+        meio = r"[^\n]{0,40}?\."
+    return re.compile(
+        r"proclama[çc][ãa]o\s+do\s+evangelho\s+de\s+jesus\s+cristo\b" + meio + r"\.?\s*"
+        r"(?:todos\s*:?\s*)?(?:gl[óo]ria\s+a\s+v[óo]s,?\s*senhor[.!]?)?",
+        re.IGNORECASE,
+    )
 
 # BUG REAL encontrado em 21/09/2026 (3ª rodada): texto extraído de PDFs
 # cuja fonte embutida não tem mapeamento Unicode correto para certas
@@ -316,7 +392,11 @@ def extrair_texto_proprio_prefacio(texto: str) -> str:
 
 
 def limpar_texto_leitura(
-    texto_bruto: str, ref: str = "", preservar_quebras: bool = False, eh_evangelho: bool = False
+    texto_bruto: str,
+    ref: str = "",
+    preservar_quebras: bool = False,
+    eh_evangelho: bool = False,
+    evangelista: str = "",
 ) -> str:
     """Limpa o texto corrido de uma leitura/salmo/evangelho vindo de uma
     fonte que despeja o bloco inteiro (referência + introdução + forma
@@ -348,6 +428,15 @@ def limpar_texto_leitura(
     texto = (texto_bruto or "").strip()
     if not texto:
         return texto
+
+    if eh_evangelho:
+        # Aplicado ao texto INTEIRO (não linha por linha) — sobrevive a
+        # qualquer ponto onde a fonte decida quebrar a linha no meio da
+        # saudação/proclamação (ver comentário de _PADRAO_SAUDACAO_EVANGELHO
+        # acima sobre o bug real disso).
+        texto = _PADRAO_SAUDACAO_EVANGELHO.sub("", texto, count=1)
+        texto = _padrao_proclamacao_evangelho(evangelista).sub("", texto, count=1)
+        texto = texto.strip()
 
     linhas_brutas = texto.split("\n")
     sem_forma_breve = []
@@ -393,14 +482,18 @@ def limpar_texto_leitura(
             continue
         if _PADRAO_LINHA_NUMERO_VERSICULO.match(linha):
             continue
-        if _PADRAO_LINHA_FECHAMENTO.match(linha):
-            continue
-        if eh_evangelho and (
-            _PADRAO_SAUDACAO_EVANGELHO.match(linha)
-            or _PADRAO_PROCLAMACAO_EVANGELHO_LINHA.match(linha)
-        ):
+        if _linha_e_so_fechamento(linha):
             continue
         linha = _PADRAO_PREFIXO_VERSICULO_LINHA.sub("", linha, count=1)
+        # BUG REAL encontrado em 21/09/2026 (simulação 27/09/2026): algumas
+        # fontes colam o diálogo de fechamento ("Todos: Graças a Deus.")
+        # no FINAL da mesma linha do corpo real da leitura, em vez de numa
+        # linha própria — o que o _linha_e_so_fechamento acima não pega
+        # (ele só descarta a linha INTEIRA quando ela é só fechamento).
+        # Remove esse sufixo colado, preservando o texto real que veio antes.
+        linha = _PADRAO_SUFIXO_FECHAMENTO.sub("", linha).rstrip()
+        if not linha:
+            continue
         linhas_limpas.append(linha)
     separador = "\n" if preservar_quebras else " "
     return remover_glifos_invalidos(separador.join(linhas_limpas).strip())

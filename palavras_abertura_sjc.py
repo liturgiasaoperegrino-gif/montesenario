@@ -191,24 +191,53 @@ def _extrair_aclamacao(texto_pdf: str) -> dict:
 
 
 def _extrair_oferendas(texto_pdf: str) -> str:
-    """Texto da seção 'ORAÇÃO SOBRE AS OFERENDAS' do boletim — usada
-    como fallback (Seção 15) quando nem o OSM nem o Pocket Terço têm
-    essa oração para a data. Levanta ValueError se a seção não existir
-    (o chamador trata isso como 'esta fonte também não tem')."""
-    bloco = _isolar_secao(texto_pdf, r"ORA[ÇC][ÃA]O\s+SOBRE\s+AS\s+OFERENDAS")
+    """Texto da seção de Oferendas do boletim — usada como fallback
+    (Seção 15) quando nem o OSM nem o Pocket Terço têm essa oração para
+    a data. Levanta ValueError se a seção não existir (o chamador trata
+    isso como 'esta fonte também não tem').
+
+    BUG REAL corrigido em 21/09/2026 (relatado pelo usuário, por
+    inspeção do texto bruto): o cabeçalho real do boletim não é
+    'ORAÇÃO SOBRE AS OFERENDAS' (isso era um chute de uma rodada
+    anterior, nunca confirmado contra o PDF de verdade) — é uma
+    anotação entre parênteses, '(Sobre as Oferendas)', sem a palavra
+    'Oração' na frente. Por isso a seção nunca era encontrada."""
+    m_ini = re.search(r"\(\s*Sobre\s+as\s+Ofere[nm]das\s*\)", texto_pdf, flags=re.IGNORECASE)
+    if not m_ini:
+        raise ValueError("cabeçalho '(Sobre as Oferendas)' não encontrado")
+    resto = texto_pdf[m_ini.end():]
+    m_fim = _PROXIMO_CABECALHO.search(resto)
+    bloco = (resto[: m_fim.start()] if m_fim else resto).strip()
     if not bloco:
-        raise ValueError("seção 'ORAÇÃO SOBRE AS OFERENDAS' não encontrada")
+        raise ValueError("seção 'Sobre as Oferendas' veio vazia")
     return re.sub(r"\s+", " ", bloco).strip()
 
 
 def _extrair_comunhao(texto_pdf: str) -> str:
-    """Texto da seção 'ORAÇÃO DEPOIS/APÓS DA COMUNHÃO' do boletim —
-    usada como fallback (Seção 18) quando nem o OSM nem o Pocket Terço
-    têm essa oração para a data. Levanta ValueError se a seção não
-    existir."""
-    bloco = _isolar_secao(texto_pdf, r"ORA[ÇC][ÃA]O\s+(DEPOIS|AP[ÓO]S)\s+DA\s+COMUNH[ÃA]O")
+    """Texto da seção de Comunhão do boletim — usada como fallback
+    (Seção 18) SÓ quando nem o OSM nem o Pocket Terço têm essa oração
+    para a data (por decisão do usuário: esta fonte é a menos confiável
+    das três, por vir de PDF em duas colunas — ver
+    _extrair_texto_pagina_pdf — por isso é sempre a última tentativa).
+
+    Cabeçalho real (mesmo formato de _extrair_oferendas, corrigido em
+    21/09/2026): anotação entre parênteses, sem a palavra 'Oração' na
+    frente. Delimitado pelo conteúdo em si ('Oremos' ... 'Amém'),
+    informado pelo usuário, em vez de só o próximo cabeçalho numerado —
+    mais resistente a essa seção vir emendada com a coluna vizinha."""
+    m_ini = re.search(r"\(\s*Depois\s+da\s+Comunh[ãa]o\s*\)", texto_pdf, flags=re.IGNORECASE)
+    if not m_ini:
+        raise ValueError("cabeçalho '(Depois da Comunhão)' não encontrado")
+    resto = texto_pdf[m_ini.end():]
+    m_oremos = re.search(r"\bOremos\b", resto, flags=re.IGNORECASE)
+    if not m_oremos:
+        raise ValueError("início 'Oremos' da Oração Depois da Comunhão não encontrado")
+    resto = resto[m_oremos.start():]
+    m_amem = re.search(r"Am[ée]m\.?", resto, flags=re.IGNORECASE)
+    bloco = resto[: m_amem.end()] if m_amem else resto
+    bloco = bloco.strip()
     if not bloco:
-        raise ValueError("seção 'ORAÇÃO DEPOIS/APÓS DA COMUNHÃO' não encontrada")
+        raise ValueError("seção 'Depois da Comunhão' veio vazia")
     return re.sub(r"\s+", " ", bloco).strip()
 
 
@@ -302,11 +331,63 @@ def _extrair_texto_pagina_pdf(page) -> str:
     if lacuna < page.width * 0.03:
         return page.extract_text() or ""
 
+    # BUG REAL corrigido em 21/09/2026 (relatado pelo usuário): um
+    # título/cabeçalho de seção que atravessa a largura inteira da
+    # página (ex.: "16. ORAÇÃO EUCARÍSTICA II (Prefácio dos Domingos do
+    # Tempo Comum VII)") tem palavras dos dois lados do meio da página
+    # — a divisão acima trata essas palavras como se fossem duas
+    # colunas de verdade, e a palavra final do título (ex.: "VII") vai
+    # parar longe do resto da frase, misturada com o conteúdo real da
+    # coluna direita naquela altura da página.
+    #
+    # Detecção: agrupa TODAS as palavras da página em linhas (por
+    # posição vertical) e mede, em cada linha, o MAIOR espaço entre
+    # palavras vizinhas. Numa linha de largura inteira esse espaço é um
+    # espaço comum entre palavras; numa linha que é, na verdade, DUAS
+    # colunas coincidindo na mesma altura, esse espaço bate perto da
+    # lacuna real da coluna (bem maior que um espaço comum). Linhas de
+    # largura inteira (que cruzam o meio da página) são extraídas à
+    # parte e reinseridas na posição vertical correta entre os blocos
+    # de coluna — nunca divididas.
+    todas_as_linhas = _agrupar_em_linhas(palavras)
+    linhas_largura_inteira = []
+    ids_palavras_de_titulo = set()
+    for linha in todas_as_linhas:
+        if len(linha) < 2:
+            continue
+        cruza_o_meio = linha[0]["x0"] < meio < linha[-1]["x1"]
+        if not cruza_o_meio:
+            continue
+        maior_espaco = max(b["x0"] - a["x1"] for a, b in zip(linha, linha[1:]))
+        if maior_espaco < lacuna * 0.6:
+            linhas_largura_inteira.append((linha[0]["top"], " ".join(p["text"] for p in linha)))
+            ids_palavras_de_titulo.update(id(p) for p in linha)
+
     def _texto_da_coluna(palavras_coluna):
         linhas = _agrupar_em_linhas(palavras_coluna)
         return "\n".join(" ".join(p["text"] for p in linha) for linha in linhas)
 
-    return _texto_da_coluna(esquerda) + "\n" + _texto_da_coluna(direita)
+    if not linhas_largura_inteira:
+        return _texto_da_coluna(esquerda) + "\n" + _texto_da_coluna(direita)
+
+    esquerda = [p for p in esquerda if id(p) not in ids_palavras_de_titulo]
+    direita = [p for p in direita if id(p) not in ids_palavras_de_titulo]
+    linhas_largura_inteira.sort(key=lambda par: par[0])
+
+    partes = []
+    topo_inicio = 0
+    for topo_titulo, texto_titulo in linhas_largura_inteira:
+        bloco_esq = [p for p in esquerda if topo_inicio <= p["top"] < topo_titulo]
+        bloco_dir = [p for p in direita if topo_inicio <= p["top"] < topo_titulo]
+        if bloco_esq or bloco_dir:
+            partes.append(_texto_da_coluna(bloco_esq) + "\n" + _texto_da_coluna(bloco_dir))
+        partes.append(texto_titulo)
+        topo_inicio = topo_titulo
+    bloco_esq = [p for p in esquerda if p["top"] >= topo_inicio]
+    bloco_dir = [p for p in direita if p["top"] >= topo_inicio]
+    if bloco_esq or bloco_dir:
+        partes.append(_texto_da_coluna(bloco_esq) + "\n" + _texto_da_coluna(bloco_dir))
+    return "\n".join(p for p in partes if p.strip())
 
 
 def _baixar_texto_pdf(dia: date) -> Optional[str]:
