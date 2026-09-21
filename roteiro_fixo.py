@@ -6,14 +6,14 @@ Textos fixos do Ordinário da Missa: as partes do roteiro que NÃO vêm de
 nenhuma fonte online porque não mudam de missa para missa (diálogos,
 Ato Penitencial, Profissão de Fé, Ritos da Comunhão, Ritos Finais).
 
-Cada seção é uma lista de (falante, texto) — falante é "Padre", "Todos"
-ou "" (rubrica/texto corrido sem diálogo). Isso deixa a renderização no
-gerador do roteiro simples: só iterar e aplicar o estilo certo por
-falante.
+Cada seção é uma lista de (falante, texto) — falante é "Celebrante",
+"Todos" ou "" (rubrica/texto corrido sem diálogo). Isso deixa a
+renderização no gerador do roteiro simples: só iterar e aplicar o
+estilo certo por falante.
 """
 
 SAUDACAO_INICIAL = [
-    ("Padre", "Louvado Seja o Nosso Senhor Jesus Cristo!"),
+    ("Celebrante", "Louvado Seja o Nosso Senhor Jesus Cristo!"),
     ("Todos", "Para sempre seja louvado."),
     ("", (
         "Bom dia! Boa noite! Sejam bem-vindos todos os que estão aqui "
@@ -23,9 +23,9 @@ SAUDACAO_INICIAL = [
 ]
 
 RITOS_INICIAIS = [
-    ("Padre", "Em nome do Pai, do Filho e do Espírito Santo."),
+    ("Celebrante", "Em nome do Pai, do Filho e do Espírito Santo."),
     ("Todos", "Amém."),
-    ("Padre", (
+    ("Celebrante", (
         "A graça de nosso Senhor Jesus Cristo, o amor do Pai e a "
         "comunhão do Espírito Santo estejam convosco."
     )),
@@ -33,7 +33,7 @@ RITOS_INICIAIS = [
 ]
 
 ATO_PENITENCIAL = [
-    ("Padre", (
+    ("Celebrante", (
         "Deus, nosso Pai, todo poderoso, rico em ternura, bondade, "
         "mansidão e misericórdia, perdoe todos e cada um de nossos "
         "pecados, nos oriente e nos conduza ao reino da eterna "
@@ -81,9 +81,9 @@ def dialogo_abertura_evangelho(texto_proclamacao: str) -> list:
     sem o diálogo em si.
     """
     return [
-        ("Padre", "O Senhor esteja convosco."),
+        ("Celebrante", "O Senhor esteja convosco."),
         ("Todos", "Ele está no meio de nós."),
-        ("Padre", texto_proclamacao),
+        ("Celebrante", texto_proclamacao),
         ("Todos", "Glória a vós, Senhor."),
     ]
 
@@ -106,7 +106,7 @@ PROFISSAO_DE_FE = (
 )
 
 APRESENTACAO_DAS_OFERENDAS = [
-    ("Padre", (
+    ("Celebrante", (
         "Oremos, irmãos e irmãs, para que este nosso sacrifício seja "
         "aceito por Deus Pai todo-poderoso."
     )),
@@ -126,7 +126,7 @@ RITOS_DA_COMUNHAO = [
         "quem nos tem ofendido; e não nos deixeis cair em tentação, "
         "mas livrai-nos do mal."
     )),
-    ("Padre", (
+    ("Celebrante", (
         "Livrai-nos de todos os males, ó Pai, e dai-nos hoje a vossa "
         "paz. Ajudados pela vossa misericórdia, sejamos sempre livres "
         "do pecado e protegidos de todos os perigos, enquanto "
@@ -134,7 +134,7 @@ RITOS_DA_COMUNHAO = [
         "Jesus Cristo."
     )),
     ("Todos", "Vosso é o reino, o poder e a glória para sempre!"),
-    ("Padre", (
+    ("Celebrante", (
         "Senhor Jesus Cristo, dissestes aos vossos Apóstolos: Eu vos "
         "deixo a paz, eu vos dou a minha paz. Não olheis os nossos "
         "pecados, mas a fé que anima vossa Igreja; dai-lhe, segundo o "
@@ -142,7 +142,7 @@ RITOS_DA_COMUNHAO = [
         "Pai e o Espírito Santo."
     )),
     ("Todos", "Amém."),
-    ("Padre", "A paz do Senhor esteja sempre convosco."),
+    ("Celebrante", "A paz do Senhor esteja sempre convosco."),
     ("Todos", "O amor de Cristo nos uniu."),
     ("", (
         "Cordeiro de Deus que tirais os pecados do mundo, tende "
@@ -150,7 +150,7 @@ RITOS_DA_COMUNHAO = [
         "mundo, tende piedade de nós; Cordeiro de Deus que tirais os "
         "pecados do mundo, dai-nos a paz."
     )),
-    ("Padre", "Eis o Cordeiro de Deus, que tira o pecado do mundo."),
+    ("Celebrante", "Eis o Cordeiro de Deus, que tira o pecado do mundo."),
     ("Todos", (
         "Senhor, eu não sou digno/a que entreis em minha morada, mas "
         "dizei uma palavra e serei salvo/a."
@@ -158,9 +158,9 @@ RITOS_DA_COMUNHAO = [
 ]
 
 RITOS_FINAIS = [
-    ("Padre", "O Senhor esteja convosco!"),
+    ("Celebrante", "O Senhor esteja convosco!"),
     ("Todos", "Ele está no meio de nós."),
-    ("Padre", (
+    ("Celebrante", (
         "E a bênção de Deus todo poderoso, Pai, Filho e Espírito "
         "Santo desça sobre vós e permaneça para sempre."
     )),

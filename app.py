@@ -147,8 +147,8 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
         "salmo": {"texto_corrido": linha.get("SALMO_TEXTO", "")},
         "leitura2_ref": linha.get("LEITURA2_REF") or None,
         "leitura2": leitura2,
-        "aclamacao_refrao": None,
-        "aclamacao_versiculo": None,
+        "aclamacao_refrao": linha.get("ACLAMACAO_REFRAO") or None,
+        "aclamacao_versiculo": linha.get("ACLAMACAO_VERSICULO") or None,
         "evangelho_ref": linha.get("EVANGELHO_REF", ""),
         "evangelho_proclamacao": "Proclamação do Evangelho de Jesus Cristo",
         "evangelho": {"texto_corrido": linha.get("EVANGELHO_TEXTO", "")},
@@ -264,12 +264,11 @@ with aba_consulta:
                     mime="application/pdf",
                 )
             st.caption(
-                "Confira a Aclamação ao Evangelho (seção 11) antes de "
-                "imprimir — ainda não vem preenchida automaticamente. Aos "
-                "domingos, a seção 02 (Palavras de Abertura) já vem "
-                "preenchida a partir do Semanário da Diocese de SJC; em "
-                "dia de semana, ou se ainda não vier, ajuste em "
-                "'Gerenciar Roteiro'."
+                "Seções 02 (Palavras de Abertura), 11 (Aclamação) e 16 "
+                "(Prefácio sugerido) já vêm preenchidas automaticamente "
+                "quando a fonte publicou — confira antes de imprimir e "
+                "ajuste em 'Gerenciar Roteiro' se precisar de outra "
+                "redação."
             )
 
 with aba_admin:
@@ -398,6 +397,7 @@ with aba_admin:
 _COLUNA_AUTO_POR_SECAO = {
     "02": "PALAVRAS_ABERTURA",
     "06": "COLETA",
+    "11": "ACLAMACAO_VERSICULO",
     "08": "LEITURA1_TEXTO",
     "09": "SALMO_TEXTO",
     "10": "LEITURA2_TEXTO",

@@ -155,28 +155,36 @@ def montar_estilos(cor_tema: str) -> dict:
         "secao": ParagraphStyle("Secao", parent=base["Heading3"],
             fontSize=12, spaceBefore=14, spaceAfter=4, textColor=cor_tema),
         "ref_secao": ParagraphStyle("RefSecao", parent=base["Normal"],
-            fontSize=10, textColor="#555555", spaceAfter=8, italic=True),
+            fontSize=10, textColor="#555555", spaceAfter=8, italic=True,
+            alignment=TA_JUSTIFY),
         "corpo": ParagraphStyle("Corpo", parent=base["Normal"],
             fontSize=10.5, leading=15, alignment=TA_JUSTIFY, spaceAfter=6),
         "refrao": ParagraphStyle("RefraoSalmo", parent=base["Normal"],
-            fontSize=10.5, leading=15, spaceAfter=8, textColor=COR_REFRAO),
+            fontSize=10.5, leading=15, spaceAfter=8, textColor=COR_REFRAO,
+            alignment=TA_JUSTIFY),
         "destaque": ParagraphStyle("Destaque", parent=base["Normal"],
-            fontSize=10.5, leading=15, spaceAfter=8, textColor="#1b6b3a"),
+            fontSize=10.5, leading=15, spaceAfter=8, textColor="#1b6b3a",
+            alignment=TA_JUSTIFY),
         "faltante": ParagraphStyle("Faltante", parent=base["Normal"],
             fontSize=9.5, leading=14, alignment=TA_JUSTIFY, spaceAfter=8,
             textColor="#a15c00", italic=True),
         "rodape": ParagraphStyle("Rodape", parent=base["Normal"],
-            fontSize=8, textColor="#999999", spaceBefore=16),
+            fontSize=8, textColor="#999999", spaceBefore=16, alignment=TA_JUSTIFY),
         "rubrica": ParagraphStyle("Rubrica", parent=base["Normal"],
             fontSize=9.5, leading=14, alignment=TA_CENTER, spaceBefore=6,
             spaceAfter=6, textColor="#777777", italic=True),
+        # Celebrante: rótulo em negrito (aplicado no texto com <b>),
+        # texto justificado como o resto do relatório.
         "falante_padre": ParagraphStyle("FalantePadre", parent=base["Normal"],
-            fontSize=10.5, leading=15, spaceAfter=6),
+            fontSize=10.5, leading=15, spaceAfter=6, alignment=TA_JUSTIFY),
+        # Todos: resposta da assembleia logo após a invocação do
+        # celebrante — rótulo e texto em vermelho, também justificado.
         "falante_todos": ParagraphStyle("FalanteTodos", parent=base["Normal"],
-            fontSize=10.5, leading=15, spaceAfter=8, leftIndent=14),
+            fontSize=10.5, leading=15, spaceAfter=8, leftIndent=14,
+            textColor=COR_RESPOSTA_ASSEMBLEIA, alignment=TA_JUSTIFY),
         "resposta_assembleia": ParagraphStyle("RespostaAssembleia", parent=base["Normal"],
             fontSize=10.5, leading=15, spaceAfter=6, leftIndent=14,
-            textColor=COR_RESPOSTA_ASSEMBLEIA),
+            textColor=COR_RESPOSTA_ASSEMBLEIA, alignment=TA_JUSTIFY),
     }
 
 
@@ -213,8 +221,10 @@ def paragrafo_versiculo(numero: str, texto: str, estilos: dict, cor_r: bool = Fa
 def paragrafo_dialogo(falante: str, texto: str, estilos: dict) -> Paragraph:
     if not falante:
         return Paragraph(texto, estilos["rubrica"])
-    if falante == "Padre":
-        return Paragraph(f"<b>Padre:</b> {texto}", estilos["falante_padre"])
+    if falante == "Celebrante":
+        return Paragraph(f"<b>Celebrante:</b> {texto}", estilos["falante_padre"])
+    # "Todos" — resposta da assembleia logo após a invocação do
+    # celebrante: rótulo e texto em vermelho (estilo já com essa cor).
     return Paragraph(f"<b>{falante}:</b> {texto}", estilos["falante_todos"])
 
 

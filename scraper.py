@@ -42,7 +42,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from gcatholic_liturgia import obter_dia_liturgico
-from palavras_abertura_sjc import obter_palavras_abertura
+from palavras_abertura_sjc import obter_conteudo_boletim
 
 BASE_URL_NOVAALIANCA = "https://novaalianca.com.br"
 BASE_URL_CNBB_API = "https://api-liturgia.edicoescnbb.com.br/contents/in/date"
@@ -113,6 +113,11 @@ class LiturgiaDoDia:
     aviso_fonte: str = ""
     palavras_abertura: str = ""  # só domingo — ver palavras_abertura_sjc.py
     fonte_palavras_abertura: str = ""  # URL do boletim usado, se achou
+    aclamacao_refrao: str = ""  # Seção 11 — Pocket Terço (principal) ou Diocese de SJC (fallback)
+    aclamacao_versiculo: str = ""
+    fonte_aclamacao: str = ""
+    prefacio_nome_auto: str = ""  # Seção 16 — sugestão automática (Diocese de SJC, só domingo)
+    prefacio_texto_auto: str = ""
 
 
 def _fatiar_por_marcadores(texto: str, marcadores: list, case_sensitive_fim: bool = False) -> dict[str, str]:
@@ -273,6 +278,44 @@ def extrair_oferendas_comunhao_pocketterco(dia: date) -> Optional[dict]:
         if not oferendas and not comunhao:
             return None
         return {"oferendas": oferendas, "comunhao": comunhao, "url": url}
+    except Exception:
+        return None
+
+
+_PADRAO_ACLAMACAO = re.compile(r"℟\.?\s*(.+?)\s*℣\.?\s*(.+)", re.DOTALL)
+_PADRAO_ACLAMACAO_SEM_SIMBOLO = re.compile(
+    r"(Aleluia,?\s*Aleluia,?\s*Aleluia\.?)\s*(.*)", re.IGNORECASE | re.DOTALL
+)
+
+
+def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
+    """Retorna {'refrao': str, 'versiculo': str, 'url': str} com a
+    Aclamação ao Evangelho (Seção 11) do dia, ou None se a fonte não
+    responder ou não trouxer essa seção. Confirmado por inspeção manual
+    em 20/09/2026: a página traz '℟. Aleluia, Aleluia, Aleluia. ℣.
+    Vinde abrir o nosso coração...' — com fallback sem os símbolos ℟/℣
+    caso a extração de texto os perca."""
+    url = montar_url_pocketterco(dia)
+    try:
+        html = _baixar_html(url)
+        if html is None:
+            return None
+        texto = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
+
+        bloco = _extrair_secao_pocketterco(
+            texto, "Aclamação ao Evangelho",
+            ["Evangelho —", "Evangelho -", "Profissão de Fé", "Creio"],
+        )
+        if not bloco:
+            return None
+
+        m = _PADRAO_ACLAMACAO.search(bloco) or _PADRAO_ACLAMACAO_SEM_SIMBOLO.search(bloco)
+        if not m:
+            return None
+        refrao, versiculo = m.group(1).strip(), m.group(2).strip()
+        if not refrao:
+            return None
+        return {"refrao": refrao, "versiculo": versiculo, "url": url}
     except Exception:
         return None
 
@@ -452,10 +495,34 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
         base.titulo_dia = dia_gcatholic["titulo"]
         base.cor_liturgica = dia_gcatholic["cor"]
 
-    abertura = obter_palavras_abertura(dia)
-    if abertura:
-        base.palavras_abertura = abertura["texto"]
-        base.fonte_palavras_abertura = abertura["url"]
+    # Aclamação ao Evangelho (Seção 11): Pocket Terço é a fonte
+    # principal (testada e funcionando — ver
+    # extrair_aclamacao_pocketterco). A Diocese de SJC (boletim
+    # dominical) entra só como fallback, e só cobre domingo.
+    aclamacao = extrair_aclamacao_pocketterco(dia)
+    if aclamacao:
+        base.aclamacao_refrao = aclamacao["refrao"]
+        base.aclamacao_versiculo = aclamacao["versiculo"]
+        base.fonte_aclamacao = f"Pocket Terço ({aclamacao['url']})"
+
+    # Boletim da Diocese de SJC: baixado UMA VEZ, e usado para 3 coisas
+    # — palavras de abertura (Seção 02, única fonte), fallback da
+    # Aclamação (Seção 11, se o Pocket Terço não respondeu) e sugestão
+    # automática de Prefácio (Seção 16, única fonte automática — a
+    # seleção manual pela pasta do Drive continua disponível e tem
+    # prioridade se o operador escolher outra). Só cobre domingo.
+    boletim = obter_conteudo_boletim(dia)
+    if boletim:
+        if boletim["introducao"]:
+            base.palavras_abertura = boletim["introducao"]
+            base.fonte_palavras_abertura = boletim["url"]
+        if not base.aclamacao_refrao and boletim["aclamacao_refrao"]:
+            base.aclamacao_refrao = boletim["aclamacao_refrao"]
+            base.aclamacao_versiculo = boletim["aclamacao_versiculo"]
+            base.fonte_aclamacao = f"Diocese de SJC ({boletim['url']})"
+        if boletim["prefacio_nome"]:
+            base.prefacio_nome_auto = boletim["prefacio_nome"]
+            base.prefacio_texto_auto = boletim["prefacio_texto"]
 
     return base
 

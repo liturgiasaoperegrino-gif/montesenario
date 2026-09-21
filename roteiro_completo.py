@@ -113,7 +113,8 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         E["subtitulo_data"],
     ))
     story.append(HRFlowable(width="100%", thickness=1, color=dados["cor_tema"], spaceAfter=10))
-    story.append(Paragraph(dados["titulo_dia"].strip(), E["dia_liturgico"]))
+    # O título do dia litúrgico NÃO se repete aqui — aparece só uma vez,
+    # na Seção 02 (ver abaixo), já na versão corrigida/convertida.
 
     # 01 — Saudação
     secao_titulo("01", "Saudação")
@@ -161,14 +162,16 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     else:
         dialogo(fixo.ATO_PENITENCIAL)
 
-    # 05 — Glória
+    # 05 — Glória: só o título da seção (texto da oração suprimido a
+    # pedido do usuário — o celebrante/assembleia já sabem de cor).
+    # Um override manual continua funcionando normalmente, se algum dia
+    # precisar mostrar um texto específico aqui.
     over_05 = overrides.get("05")
     if over_05:
         secao_titulo("05", "Glória")
         paragrafos_livres(over_05)
     elif fixo.gloria_e_dita(dados["titulo_dia"]):
         secao_titulo("05", "Glória")
-        story.append(Paragraph(fixo.GLORIA, E["corpo"]))
 
     # 06 — Coleta
     secao_titulo("06", "Oração da Coleta")
@@ -179,15 +182,18 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     if overrides.get("07"):
         paragrafos_livres(overrides["07"])
 
-    # 08 — Primeira Leitura
-    secao_titulo("08", f"Primeira Leitura — {dados['leitura1_ref']}")
+    # 08 — Primeira Leitura. Encerra com o diálogo fixo "Palavra do
+    # Senhor. / Todos: Graças a Deus." — só no conteúdo automático; um
+    # override livre assume que o operador já incluiu tudo que quer.
+    secao_titulo("08", f"Primeira Leitura {dados['leitura1_ref']}")
     if overrides.get("08"):
         paragrafos_livres(overrides["08"])
     else:
         _renderizar_leitura(story, E, dados["leitura1"])
+        dialogo([("", "Palavra do Senhor."), ("Todos", "Graças a Deus.")])
 
     # 09 — Salmo
-    secao_titulo("09", f"Salmo Responsorial — {dados['salmo_ref']}")
+    secao_titulo("09", f"Salmo Responsorial {dados['salmo_ref']}")
     if overrides.get("09"):
         paragrafos_livres(overrides["09"])
     else:
@@ -202,13 +208,14 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
                 par_html = estilizar_versiculos_inline(par.replace("\n", "<br/>"))
                 story.append(Paragraph(par_html, E["corpo"]))
 
-    # 10 — Segunda Leitura (só se houver)
+    # 10 — Segunda Leitura (só se houver) — mesmo fechamento da 1ª Leitura
     if overrides.get("10"):
-        secao_titulo("10", f"Segunda Leitura — {dados.get('leitura2_ref', '')}")
+        secao_titulo("10", f"Segunda Leitura {dados.get('leitura2_ref', '')}")
         paragrafos_livres(overrides["10"])
     elif dados.get("leitura2"):
-        secao_titulo("10", f"Segunda Leitura — {dados['leitura2_ref']}")
+        secao_titulo("10", f"Segunda Leitura {dados['leitura2_ref']}")
         _renderizar_leitura(story, E, dados["leitura2"])
+        dialogo([("", "Palavra do Senhor."), ("Todos", "Graças a Deus.")])
 
     # 11 — Aclamação ao Evangelho
     secao_titulo("11", "Aclamação ao Evangelho")
@@ -220,7 +227,7 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
             story.append(Paragraph(dados["aclamacao_versiculo"], E["corpo"]))
 
     # 12 — Evangelho
-    secao_titulo("12", f"Evangelho — {dados['evangelho_ref']}")
+    secao_titulo("12", f"Evangelho {dados['evangelho_ref']}")
     if overrides.get("12"):
         paragrafos_livres(overrides["12"])
     else:

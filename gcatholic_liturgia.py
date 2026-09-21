@@ -77,11 +77,37 @@ _PADRAO_DOMINGO_NUMERADO = re.compile(
 )
 
 
+_CARACTERES_INVISIVEIS = (
+    "︎"  # VARIATION SELECTOR-15 (força apresentação como texto)
+    "️"  # VARIATION SELECTOR-16 (força apresentação como emoji)
+    "​"  # ZERO WIDTH SPACE
+    "‌"  # ZERO WIDTH NON-JOINER
+    "‍"  # ZERO WIDTH JOINER
+    "﻿"  # ZERO WIDTH NO-BREAK SPACE / BOM
+)
+
+
+def _limpar_invisiveis(texto: str) -> str:
+    """Remove caracteres invisíveis de formatação de emoji (ex.:
+    VARIATION SELECTOR-16 U+FE0F, que alguns feeds colam logo depois
+    do emoji de cor, tipo '⚪️') e outros caracteres de largura zero.
+    Sem isso, a regex do título ('^Domingo...') falha porque a string
+    não começa visualmente, mas tecnicamente começa, com esse
+    caractere invisível — bug real encontrado em produção (conversão
+    de romano para ordinal simplesmente não disparava). Remove só esse
+    conjunto específico e conhecido — nunca a categoria genérica 'Mn'
+    inteira, que incluiria acentos combinantes legítimos do português
+    em textos não normalizados (NFD)."""
+    for ch in _CARACTERES_INVISIVEIS:
+        texto = texto.replace(ch, "")
+    return texto
+
+
 def formatar_titulo_dia(titulo: str) -> str:
     """Converte 'Domingo XXV do Tempo Comum' em '25º Domingo do Tempo
     Comum' (o formato pedido pelo usuário). Qualquer outro título (dia
     de semana, festa, solenidade) volta só limpo, sem alteração."""
-    titulo = (titulo or "").strip()
+    titulo = _limpar_invisiveis((titulo or "").strip()).strip()
     m = _PADRAO_DOMINGO_NUMERADO.match(titulo)
     if m:
         numero = _romano_para_arabico(m.group(1))
@@ -153,6 +179,7 @@ def _extrair_do_texto(texto_ics: str, dia: date) -> Optional[dict]:
                 summary = (
                     summary.replace("\\,", ",").replace("\\;", ";").replace("\\n", " ").strip()
                 )
+                summary = _limpar_invisiveis(summary)
 
                 cor = "verde"
                 for emoji, nome_cor in EMOJI_COR.items():

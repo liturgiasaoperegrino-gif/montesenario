@@ -2,15 +2,28 @@
 """
 palavras_abertura_sjc.py — Montesenario
 
-Extrai as "palavras de abertura" (a breve introdução ao tema da missa
-que aparece antes do Canto de Abertura) do boletim dominical
-"Semanário Litúrgico" da Diocese de São José dos Campos, publicado
-mensalmente em PDF na categoria "Nova Aliança" do site da diocese:
+Extrai conteúdo do boletim dominical "Semanário Litúrgico" da Diocese
+de São José dos Campos, publicado mensalmente em PDF na categoria
+"Nova Aliança" do site da diocese:
     https://diocese-sjc.org.br/categoria/nova-alianca/
 
-Só cobre domingos — é um boletim dominical. Em dia de semana,
-obter_palavras_abertura() retorna None e a Seção 02 do roteiro segue
-em branco, para preenchimento manual (como já era antes).
+Cobre 3 seções do roteiro, todas extraídas de UM ÚNICO download do PDF
+do dia (ver obter_conteudo_boletim):
+  - Seção 02 (palavras de abertura) — a introdução antes do Canto de
+    Abertura.
+  - Seção 11 (Aclamação ao Evangelho) — refrão + versículo. Usada como
+    FALLBACK do Pocket Terço (fonte principal — ver
+    scraper.extrair_aclamacao_pocketterco), pra quando este não
+    responder.
+  - Seção 16 (Prefácio) — nome/referência (ex.: "Prefácio dos
+    Domingos do Tempo Comum IX") e texto completo, extraídos de dentro
+    da seção "Oração Eucarística" do boletim. Único automatismo para o
+    Prefácio; a seleção manual pela pasta do Drive continua disponível
+    e tem prioridade se o operador escolher outra.
+
+Só cobre domingos — é um boletim dominical. Em dia de semana, cada
+função retorna None/vazio e a respectiva seção do roteiro segue no
+comportamento de antes (em branco ou dependente de outra fonte).
 
 Fluxo:
 1. Página do mês (uma por mês, reúne os PDFs de todos os domingos):
@@ -18,18 +31,13 @@ Fluxo:
 2. Nessa página, acha o link cujo texto visível começa com
    "{DD} de {mes}" (ex.: "20 de setembro - 25º Domingo do Tempo
    Comum") e pega a URL do .pdf correspondente.
-3. Baixa o PDF e extrai o texto com pdfplumber.
-4. A introdução fica entre a linha do título do dia (em CAIXA ALTA,
-   ex. "25º DOMINGO DO TEMPO COMUM – MÊS DA BÍBLIA") e o cabeçalho
-   "CANTO DE ABERTURA", que sempre vem logo em seguida no boletim.
-
-Confirmado por inspeção manual em 20/09/2026: o PDF
-".../20-de-setembro-de-2026-25o-Domingo-do-Tempo-Comum.pdf" começa com
-"Semanário Litúrgico – Ano XXXII – Nº 53 – 20 de setembro de 2026 –
-Diocese de São José dos Campos - SP", depois "25º DOMINGO DO TEMPO
-COMUM – MÊS DA BÍBLIA", depois a introdução ("Na liturgia de hoje nos
-encontraremos com a bondade de Deus...") e só então "CANTO DE
-ABERTURA" (seção 1 da ordem da missa do boletim).
+3. Baixa o PDF e extrai o texto com pdfplumber (uma vez só).
+4. Cada seção é isolada por regex sobre esse texto — ver cada função
+   _extrair_* abaixo para o padrão exato confirmado por inspeção
+   manual em 20/09/2026 (numeração de seção do próprio boletim: 1.
+   CANTO DE ABERTURA ... 10. ACLAMAÇÃO AO EVANGELHO ... 15. ORAÇÃO
+   EUCARÍSTICA II (Prefácio dos Domingos do Tempo Comum IX – MR, pág.
+   482) ...).
 
 Requisitos:
     pip install requests beautifulsoup4 pdfplumber
@@ -107,6 +115,31 @@ def _achar_url_pdf(dia: date) -> Optional[str]:
     return None
 
 
+# Próximo cabeçalho numerado do boletim (ex.: "11. PROFISSÃO DE FÉ"),
+# usado como limite direito ao isolar uma seção — mais confiável do que
+# listar cada nome de seção manualmente, já que todas são numeradas.
+_PROXIMO_CABECALHO = re.compile(r"\n\s*\d{1,2}\s*[.\-–]\s*[A-ZÀ-Ú]")
+
+_PADRAO_ACLAMACAO_SEM_SIMBOLO = re.compile(
+    r"(Aleluia,?\s*Aleluia,?\s*Aleluia\.?)\s*(.*)", re.IGNORECASE | re.DOTALL
+)
+
+
+def _isolar_secao(texto_pdf: str, cabecalho_regex: str) -> str:
+    """Isola o texto entre um cabeçalho numerado (ex.: 'ACLAMAÇÃO AO
+    EVANGELHO', com ou sem o número/pontuação na frente) e o próximo
+    cabeçalho numerado do boletim. String vazia se o cabeçalho não for
+    encontrado."""
+    m_ini = re.search(
+        r"\d{1,2}\s*[.\-–]\s*" + cabecalho_regex, texto_pdf, flags=re.IGNORECASE
+    )
+    if not m_ini:
+        return ""
+    resto = texto_pdf[m_ini.end():]
+    m_fim = _PROXIMO_CABECALHO.search(resto)
+    return (resto[: m_fim.start()] if m_fim else resto).strip()
+
+
 def _extrair_introducao(texto_pdf: str) -> str:
     """A introdução fica entre a linha do título do dia (última linha
     em CAIXA ALTA contendo 'DOMINGO'/'SOLENIDADE'/'FESTA'/etc. antes do
@@ -131,38 +164,136 @@ def _extrair_introducao(texto_pdf: str) -> str:
     introducao = antes[m_titulo.end():].strip()
     introducao = re.sub(r"\n{2,}", "\n\n", introducao)
     introducao = re.sub(r"[ \t]+", " ", introducao)
+    # O boletim numera "1. CANTO DE ABERTURA" — como o corte acima é
+    # antes de "CANTO DE ABERTURA", sobra o número/pontuação soltos
+    # ("...vinha.\n\n1.") no fim; remove esse resto.
+    introducao = re.sub(r"\s*\d{1,2}\s*[.\-–]\s*$", "", introducao).strip()
     if not introducao:
         raise ValueError("introdução veio vazia")
     return introducao
+
+
+def _extrair_aclamacao(texto_pdf: str) -> dict:
+    """{'refrao': str, 'versiculo': str} a partir da seção 'ACLAMAÇÃO
+    AO EVANGELHO' do boletim — usada como fallback do Pocket Terço
+    (fonte principal). Levanta ValueError se a seção não existir ou
+    não tiver o padrão 'Aleluia, Aleluia, Aleluia. <versículo>'."""
+    bloco = _isolar_secao(texto_pdf, r"ACLAMA[ÇC][ÃA]O\s+AO\s+EVANGELHO")
+    if not bloco:
+        raise ValueError("seção 'ACLAMAÇÃO AO EVANGELHO' não encontrada")
+    m = _PADRAO_ACLAMACAO_SEM_SIMBOLO.search(bloco)
+    if not m or not m.group(1).strip():
+        raise ValueError("padrão 'Aleluia...' não encontrado no bloco")
+    return {"refrao": m.group(1).strip(), "versiculo": m.group(2).strip()}
+
+
+def _extrair_prefacio(texto_pdf: str) -> dict:
+    """{'nome': str, 'texto': str} a partir da seção 'ORAÇÃO
+    EUCARÍSTICA' do boletim — confirmado por inspeção manual em
+    20/09/2026: logo após o cabeçalho ('15. ORAÇÃO EUCARÍSTICA II')
+    vem uma referência entre parênteses ('(Prefácio dos Domingos do
+    Tempo Comum IX – MR, pág. 482)') e, em seguida, o texto do
+    Prefácio até 'Santo, Santo, Santo' (o Santo não entra — é a
+    resposta da assembleia, já coberta por oracoes_eucaristicas.py).
+    Levanta ValueError se algum desses marcadores não for encontrado."""
+    m_secao = re.search(
+        r"\d{1,2}\s*[.\-–]\s*ORA[ÇC][ÃA]O\s+EUCAR[ÍI]STICA", texto_pdf, flags=re.IGNORECASE
+    )
+    if not m_secao:
+        raise ValueError("seção 'ORAÇÃO EUCARÍSTICA' não encontrada")
+
+    resto = texto_pdf[m_secao.end():]
+    m_nome = re.search(r"\(([^)]+)\)", resto)
+    if not m_nome:
+        raise ValueError("referência entre parênteses do Prefácio não encontrada")
+
+    depois_do_nome = resto[m_nome.end():]
+    m_santo = re.search(r"Santo,?\s*Santo,?\s*Santo", depois_do_nome, flags=re.IGNORECASE)
+    texto_prefacio = depois_do_nome[: m_santo.start()] if m_santo else depois_do_nome
+    texto_prefacio = re.sub(r"\s+", " ", texto_prefacio).strip()
+    if not texto_prefacio:
+        raise ValueError("texto do Prefácio veio vazio")
+
+    return {"nome": m_nome.group(1).strip(), "texto": texto_prefacio}
+
+
+def _baixar_texto_pdf(dia: date) -> Optional[str]:
+    """Acha e baixa o PDF do domingo pedido, devolvendo o texto já
+    extraído (pdfplumber) — ou None se não achar o PDF ou a
+    biblioteca/rede falhar. Isolado para ser baixado UMA VEZ só e
+    reaproveitado por todas as extrações (introdução, aclamação,
+    prefácio)."""
+    if pdfplumber is None:
+        return None
+    url_pdf = _achar_url_pdf(dia)
+    if not url_pdf:
+        return None
+    try:
+        resp = requests.get(url_pdf, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+            texto = "\n".join((p.extract_text() or "") for p in pdf.pages)
+        return texto, url_pdf
+    except Exception:
+        return None
+
+
+def obter_conteudo_boletim(dia: date) -> Optional[dict]:
+    """Baixa o boletim do domingo pedido UMA VEZ e tenta extrair as 3
+    seções (palavras de abertura, aclamação, prefácio) de forma
+    independente — a falha de parsing de uma NÃO derruba as outras.
+    Retorna None só se o PDF em si não puder ser baixado/encontrado
+    (ex.: dia de semana, boletim do mês ainda não publicado). Campos
+    não encontrados voltam como string vazia ("")."""
+    resultado_download = _baixar_texto_pdf(dia)
+    if not resultado_download:
+        return None
+    texto_pdf, url_pdf = resultado_download
+
+    saida = {
+        "url": url_pdf,
+        "introducao": "",
+        "aclamacao_refrao": "",
+        "aclamacao_versiculo": "",
+        "prefacio_nome": "",
+        "prefacio_texto": "",
+    }
+    try:
+        saida["introducao"] = _extrair_introducao(texto_pdf)
+    except Exception:
+        pass
+    try:
+        aclamacao = _extrair_aclamacao(texto_pdf)
+        saida["aclamacao_refrao"] = aclamacao["refrao"]
+        saida["aclamacao_versiculo"] = aclamacao["versiculo"]
+    except Exception:
+        pass
+    try:
+        prefacio = _extrair_prefacio(texto_pdf)
+        saida["prefacio_nome"] = prefacio["nome"]
+        saida["prefacio_texto"] = prefacio["texto"]
+    except Exception:
+        pass
+    return saida
 
 
 def obter_palavras_abertura(dia: date) -> Optional[dict]:
     """Retorna {'texto': str, 'url': str} com as palavras de abertura
     extraídas do Semanário Litúrgico da Diocese de SJC para o domingo
     pedido, ou None se: não for um domingo com boletim publicado, a
-    fonte não responder, ou o parsing falhar por qualquer motivo
-    (formato do PDF mudou etc.) — nunca levanta exceção para quem
-    chamar; a Seção 02 simplesmente segue em branco nesse caso."""
-    if pdfplumber is None:
+    fonte não responder, ou essa seção específica não puder ser
+    isolada do texto — nunca levanta exceção para quem chamar; a
+    Seção 02 simplesmente segue em branco nesse caso.
+
+    Mantida como função própria (além de fazer parte de
+    obter_conteudo_boletim) porque já é chamada assim em scraper.py."""
+    boletim = obter_conteudo_boletim(dia)
+    if not boletim or not boletim["introducao"]:
         return None
-    try:
-        url_pdf = _achar_url_pdf(dia)
-        if not url_pdf:
-            return None
-
-        resp = requests.get(url_pdf, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-
-        with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
-            texto = "\n".join((p.extract_text() or "") for p in pdf.pages)
-
-        introducao = _extrair_introducao(texto)
-        return {"texto": introducao, "url": url_pdf}
-    except Exception:
-        return None
+    return {"texto": boletim["introducao"], "url": boletim["url"]}
 
 
 if __name__ == "__main__":
     from datetime import date as _date
 
-    print(obter_palavras_abertura(_date(2026, 9, 20)))
+    print(obter_conteudo_boletim(_date(2026, 9, 20)))

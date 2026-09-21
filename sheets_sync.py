@@ -57,6 +57,7 @@ CABECALHO = [
     "LEITURAS_CONFIRMADAS", "AVISO_FONTE",
     "URL_FONTE",
     "PALAVRAS_ABERTURA", "FONTE_PALAVRAS_ABERTURA",
+    "ACLAMACAO_REFRAO", "ACLAMACAO_VERSICULO", "FONTE_ACLAMACAO",
     "SECOES_OVERRIDE",
 ]
 
@@ -302,6 +303,7 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
             "NÃO", d["aviso_fonte"],
             d["url_fonte"],
             "", "",
+            "", "", "",
             "{}",
         ]
 
@@ -321,7 +323,14 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
             comunhao_texto = dados_pocketterco["comunhao"]
             fonte_extra = f"Pocket Terço ({dados_pocketterco['url']})"
 
-    oracao_euc = sugerir_oracao_eucaristica_completa(d["titulo_dia"])
+    # Prefácio: sugestão automática (Diocese de SJC, só domingo) já vai
+    # direto para PREFACIO_NOME/TEXTO — a tela "Prefácio antes da
+    # Oração Eucarística" continua disponível pra trocar por outro da
+    # pasta do Drive a qualquer momento (grava por cima, sem conflito).
+    # Quando existe Prefácio próprio, a Oração Eucarística sugerida
+    # também muda (regra da IGMR n. 365: III em vez de IV aos domingos).
+    tem_prefacio_proprio = bool(d["prefacio_texto_auto"])
+    oracao_euc = sugerir_oracao_eucaristica_completa(d["titulo_dia"], tem_prefacio_proprio)
     oracao_euc_resumo = f"{oracao_euc['nome']} — {oracao_euc['motivo']}"
 
     fonte_combinada = d["fonte_leituras"]
@@ -338,10 +347,11 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
         d["evangelho_ref"], d["evangelho_texto"],
         oferendas_texto, comunhao_texto, fonte_extra,
         oracao_euc_resumo, oracao_euc["texto"],
-        "", "",
+        d["prefacio_nome_auto"], d["prefacio_texto_auto"],
         "SIM", d["aviso_fonte"],
         d["url_fonte"],
         d["palavras_abertura"], d["fonte_palavras_abertura"],
+        d["aclamacao_refrao"], d["aclamacao_versiculo"], d["fonte_aclamacao"],
         "{}",
     ]
 
