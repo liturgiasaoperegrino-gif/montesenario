@@ -94,6 +94,23 @@ def dialogo_abertura_evangelho(texto_proclamacao: str) -> list:
     ]
 
 
+DIALOGO_PREFACIO = [
+    # Diálogo Introdutório do Prefácio — texto fixo do Missal Romano,
+    # idêntico para todo Prefácio, por isso mora aqui (igual às outras
+    # partes do Ordinário) em vez de depender do texto de cada arquivo
+    # de Prefácio (Google Drive) ou do boletim da Diocese de SJC — essa
+    # era, aliás, a origem de um bug real: quando esse trecho vinha de
+    # PDF de boletim, era o mais sujeito a caracteres quebrados (fonte
+    # sem mapeamento correto para acentos, gerando quadrados pretos).
+    ("Celebrante", "O Senhor esteja convosco."),
+    ("Todos", "Ele está no meio de nós."),
+    ("Celebrante", "Corações ao alto."),
+    ("Todos", "O nosso coração está em Deus."),
+    ("Celebrante", "Demos graças ao Senhor, nosso Deus."),
+    ("Todos", "É nosso dever e nossa salvação."),
+]
+
+
 CONVITE_ACLAMACAO = (
     "Fiquemos em pé e com muita alegria vamos aclamar o Santo "
     "Evangelho, cantando."

@@ -37,6 +37,7 @@ import roteiro_fixo as fixo
 from roteiro_render import (
     montar_estilos, paragrafo_versiculo, paragrafo_dialogo,
     paragrafos_com_respostas_assembleia, estilizar_versiculos_inline,
+    remover_glifos_invalidos, extrair_texto_proprio_prefacio,
     COR_REFRAO,
 )
 
@@ -147,12 +148,18 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
             "as palavras de abertura desta missa)", E["faltante"]
         ))
 
-    # 03 — Ritos Iniciais
+    # 03 — Ritos Iniciais: quando há Antífona de Entrada, ela abre a
+    # seção, ANTES da saudação do celebrante ("Em nome do Pai...") —
+    # pedido explícito do usuário.
     secao_titulo("03", "Ritos Iniciais")
     over_03 = overrides.get("03")
     if over_03:
         paragrafos_livres(over_03)
     else:
+        antifona_entrada = dados.get("antifona_entrada")
+        if antifona_entrada:
+            story.append(Paragraph("Antífona de Entrada", E["ref_secao"]))
+            paragrafos_livres(antifona_entrada)
         dialogo(fixo.RITOS_INICIAIS)
 
     # 04 — Ato Penitencial
@@ -193,29 +200,33 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         _renderizar_leitura(story, E, dados["leitura1"])
         dialogo([("", "Palavra do Senhor."), ("Todos", "Graças a Deus.")])
 
-    # 09 — Salmo
+    # 09 — Salmo Responsorial: formato-padrão dos boletins/missalinhas —
+    # refrão primeiro (cantor/todos), depois CADA estrofe numerada
+    # (1., 2., 3. — não mais com travessão) seguida da REPETIÇÃO do
+    # refrão, terminando sempre no refrão (não na última estrofe).
+    # Correção pedida explicitamente pelo usuário ("acerte a forma de
+    # apresentar o Salmo").
     secao_titulo("09", f"Salmo Responsorial {dados['salmo_ref']}")
     if overrides.get("09"):
         paragrafos_livres(overrides["09"])
     else:
-        story.append(Paragraph(
-            f'<b><font color="#c62828">R:</font> {dados["salmo_refrao"]}</b>', E["refrao"]
-        ))
+        refrao_html = f'<b><font color="{COR_REFRAO}">R:</font> {dados["salmo_refrao"]}</b>'
         if "versos" in dados["salmo"]:
+            story.append(Paragraph(refrao_html, E["refrao"]))
             for numero, texto in dados["salmo"]["versos"]:
-                story.append(paragrafo_versiculo(numero, texto, E, cor_r=True))
+                story.append(paragrafo_versiculo(numero, texto, E))
+                story.append(Paragraph(refrao_html, E["refrao"]))
         elif dados["salmo"].get("texto_corrido"):
-            # Cada estrofe do salmo é mostrada com um travessão na
-            # frente ("- texto"), no padrão pedido pelo usuário — em vez
-            # dos números de versículo destacados usados nas leituras.
-            for par in dados["salmo"]["texto_corrido"].split("\n\n"):
-                par = par.strip()
-                if not par:
-                    continue
-                if not par.startswith("-"):
-                    par = f"- {par}"
-                par_html = estilizar_versiculos_inline(par.replace("\n", "<br/>"))
-                story.append(Paragraph(par_html, E["corpo"]))
+            estrofes = [
+                e.strip().lstrip("-").strip()
+                for e in dados["salmo"]["texto_corrido"].split("\n\n")
+                if e.strip()
+            ]
+            story.append(Paragraph(refrao_html, E["refrao"]))
+            for i, estrofe in enumerate(estrofes, start=1):
+                estrofe_html = estilizar_versiculos_inline(estrofe.replace("\n", "<br/>"))
+                story.append(Paragraph(f"{i}. {estrofe_html}", E["corpo"]))
+                story.append(Paragraph(refrao_html, E["refrao"]))
 
     # 10 — Segunda Leitura (só se houver) — mesmo fechamento da 1ª Leitura
     if overrides.get("10"):
@@ -280,7 +291,16 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     if overrides.get("16"):
         paragrafos_livres(overrides["16"])
     else:
-        for flowable in paragrafos_com_respostas_assembleia(dados["prefacio_texto"], E):
+        # Diálogo Introdutório do Prefácio: sempre o texto fixo do
+        # Missal (ver roteiro_fixo.DIALOGO_PREFACIO) — não depende mais
+        # de o arquivo/boletim trazer esse trecho intacto (era a parte
+        # mais sujeita a caracteres quebrados/duplicação do nome do
+        # Prefácio, já mostrado no título da seção acima).
+        dialogo(fixo.DIALOGO_PREFACIO)
+        texto_prefacio_limpo = remover_glifos_invalidos(
+            extrair_texto_proprio_prefacio(dados["prefacio_texto"])
+        )
+        for flowable in paragrafos_com_respostas_assembleia(texto_prefacio_limpo, E):
             story.append(flowable)
         story.append(Spacer(1, 6))
         story.append(Paragraph(dados["oracao_euc"]["nome"], E["secao"]))

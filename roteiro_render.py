@@ -246,8 +246,78 @@ _PADRAO_LINHA_FECHAMENTO = re.compile(
 )
 _PADRAO_OU_MAIS_BREVE = re.compile(r"^ou\s+mais\s+breve$", re.IGNORECASE)
 
+# BUG REAL encontrado em 21/09/2026 (3ª rodada): a fonte do Evangelho
+# despeja, junto com o texto bíblico, a própria saudação/proclamação do
+# celebrante ("Padre: O Senhor esteja convosco Todos: Ele está no meio
+# de nós" / "Proclamação do Evangelho de Jesus Cristo † segundo Mateus.
+# Todos: Glória a vós, Senhor") — que o roteiro já insere sozinho, com
+# texto fixo do Ordinário da Missa, ANTES do corpo do Evangelho (ver
+# roteiro_fixo.dialogo_abertura_evangelho). Sem isso, essa saudação saía
+# duplicada e misturada ao texto bíblico. Usadas só quando
+# `eh_evangelho=True` — não têm por que bater em leitura 1/2.
+_PADRAO_SAUDACAO_EVANGELHO = re.compile(
+    r"^(?:padre|celebrante)?\s*:?\s*o\s+senhor\s+esteja\s+convosco[.!]?\s*"
+    r"(?:todos\s*:?\s*)?(?:ele\s+est[áa]\s+no\s+meio\s+de\s+n[óo]s[.!]?)?\s*$",
+    re.IGNORECASE,
+)
+_PADRAO_PROCLAMACAO_EVANGELHO_LINHA = re.compile(
+    r"^proclama[çc][ãa]o\s+do\s+evangelho\s+de\s+jesus\s+cristo\b[^\n]*?"
+    r"(?:todos\s*:?\s*)?(?:gl[óo]ria\s+a\s+v[óo]s,?\s*senhor[.!]?)?\s*$",
+    re.IGNORECASE,
+)
 
-def limpar_texto_leitura(texto_bruto: str, ref: str = "", preservar_quebras: bool = False) -> str:
+# BUG REAL encontrado em 21/09/2026 (3ª rodada): texto extraído de PDFs
+# cuja fonte embutida não tem mapeamento Unicode correto para certas
+# letras acentuadas vira, no ReportLab, quadrados pretos (glifo
+# ausente) — sobretudo em trechos vindos do boletim da Diocese de SJC.
+# Como não dá pra recuperar a letra original a partir do código
+# encontrado, o caractere é removido (uma lacuna é sempre menos ruim
+# que um quadrado preto no meio da palavra).
+_PADRAO_GLIFOS_INVALIDOS = re.compile(
+    "[-�\U000F0000-\U000FFFFD\U00100000-\U0010FFFD]"
+)
+
+
+def remover_glifos_invalidos(texto: str) -> str:
+    """Remove caracteres que a fonte padrão do PDF (Helvetica, sem
+    glifos especiais registrados) não consegue desenhar — Área de Uso
+    Privado do Unicode e o caractere de substituição '�' — usado
+    como rede de segurança para qualquer texto vindo de extração de PDF
+    (boletim da Diocese de SJC): Prefácio, Palavras de Abertura,
+    Oferendas e Comunhão."""
+    if not texto:
+        return texto
+    return _PADRAO_GLIFOS_INVALIDOS.sub("", texto)
+
+
+_PADRAO_ULTIMA_RESPOSTA_DIALOGO_PREFACIO = re.compile(
+    r"^R\.?\s*.{0,60}salva[çc][ãa]o\.?\s*$", re.IGNORECASE | re.MULTILINE
+)
+
+
+def extrair_texto_proprio_prefacio(texto: str) -> str:
+    """Remove o cabeçalho fixo que normalmente abre um arquivo de
+    Prefácio (nome, subtítulo/tema e o Diálogo Introdutório — 'V. O
+    Senhor esteja convosco. ... R. É nosso dever e nossa salvação.').
+    Esse diálogo agora é sempre renderizado à parte, com texto fixo do
+    Missal (ver roteiro_fixo.DIALOGO_PREFACIO): duplicava o nome do
+    Prefácio (já no título da Seção 16) e, quando o texto vinha de PDF
+    de boletim, era exatamente o trecho mais sujeito a caracteres
+    quebrados (fonte sem mapeamento correto para acentos — ver
+    remover_glifos_invalidos). Corta tudo até (e incluindo) a última
+    linha de resposta desse diálogo; se não achar esse diálogo no texto
+    (ex.: arquivo já sem esse cabeçalho), devolve o texto como veio."""
+    if not texto:
+        return texto
+    ocorrencias = list(_PADRAO_ULTIMA_RESPOSTA_DIALOGO_PREFACIO.finditer(texto))
+    if ocorrencias:
+        return texto[ocorrencias[-1].end():].strip()
+    return texto.strip()
+
+
+def limpar_texto_leitura(
+    texto_bruto: str, ref: str = "", preservar_quebras: bool = False, eh_evangelho: bool = False
+) -> str:
     """Limpa o texto corrido de uma leitura/salmo/evangelho vindo de uma
     fonte que despeja o bloco inteiro (referência + introdução + forma
     breve alternativa + números de versículo em linhas soltas +
@@ -303,7 +373,21 @@ def limpar_texto_leitura(texto_bruto: str, ref: str = "", preservar_quebras: boo
         linha = linha.strip()
         if not linha:
             continue
-        if ref_normalizada and re.sub(r"\s+", "", linha).lower() == ref_normalizada:
+        linha_normalizada = re.sub(r"\s+", "", linha).lower()
+        if ref_normalizada and linha_normalizada == ref_normalizada:
+            continue
+        # BUG REAL encontrado em 21/09/2026 (3ª rodada): algumas fontes
+        # prefixam a referência com o rótulo da seção na mesma linha
+        # ("Evangelho Mt 21,28-32", "Segunda Leitura: Fl 2,1-11") — não
+        # bate na comparação exata acima. Casa quando a linha TERMINA
+        # com a referência e sobra só um rótulo curto na frente (limite
+        # de 20 caracteres evita apagar por engano um texto bíblico que
+        # coincidentemente termine com os mesmos dígitos/letras).
+        if (
+            ref_normalizada
+            and linha_normalizada.endswith(ref_normalizada)
+            and 0 < len(linha_normalizada) - len(ref_normalizada) <= 20
+        ):
             continue
         if _PADRAO_LINHA_INTRO_LEITURA.match(linha):
             continue
@@ -311,10 +395,15 @@ def limpar_texto_leitura(texto_bruto: str, ref: str = "", preservar_quebras: boo
             continue
         if _PADRAO_LINHA_FECHAMENTO.match(linha):
             continue
+        if eh_evangelho and (
+            _PADRAO_SAUDACAO_EVANGELHO.match(linha)
+            or _PADRAO_PROCLAMACAO_EVANGELHO_LINHA.match(linha)
+        ):
+            continue
         linha = _PADRAO_PREFIXO_VERSICULO_LINHA.sub("", linha, count=1)
         linhas_limpas.append(linha)
     separador = "\n" if preservar_quebras else " "
-    return separador.join(linhas_limpas).strip()
+    return remover_glifos_invalidos(separador.join(linhas_limpas).strip())
 
 
 def separar_refrao_estrofes_salmo(texto_limpo: str) -> tuple[str, list[str]]:

@@ -42,7 +42,10 @@ from prefacios import categoria_prefacio_automatica
 from gcatholic_liturgia import tempo_liturgico_de
 from secoes_roteiro import SECOES
 from roteiro_completo import montar_pdf
-from roteiro_render import cor_do_tema, limpar_texto_leitura, separar_refrao_estrofes_salmo
+from roteiro_render import (
+    cor_do_tema, limpar_texto_leitura, separar_refrao_estrofes_salmo,
+    remover_glifos_invalidos,
+)
 from roteiro_fixo import intro_leitura, nome_evangelista
 
 st.set_page_config(page_title="Montesenario", page_icon="⛪", layout="centered")
@@ -167,7 +170,16 @@ def montar_dados_para_pdf(
     # tudo isso fora (o roteiro já gera sua própria referência, intro e
     # fechamento) — texto que já vem limpo (Pocket Terço) passa incólume.
     leitura1_texto = limpar_texto_leitura(linha.get("LEITURA1_TEXTO", ""), leitura1_ref)
-    evangelho_texto = limpar_texto_leitura(linha.get("EVANGELHO_TEXTO", ""), evangelho_ref)
+    # eh_evangelho=True: além da limpeza padrão, corta a saudação/
+    # proclamação do celebrante ("O Senhor esteja convosco... /
+    # Proclamação do Evangelho... segundo Fulano") quando ela vem
+    # duplicada dentro do próprio texto bíblico da fonte — o roteiro já
+    # insere essa moldura sozinho, com texto fixo (ver
+    # roteiro_fixo.dialogo_abertura_evangelho), logo antes do corpo do
+    # Evangelho.
+    evangelho_texto = limpar_texto_leitura(
+        linha.get("EVANGELHO_TEXTO", ""), evangelho_ref, eh_evangelho=True
+    )
 
     leitura2 = None
     if linha.get("LEITURA2_TEXTO"):
@@ -230,7 +242,7 @@ def montar_dados_para_pdf(
         "titulo_dia": linha.get("TITULO_DIA", ""),
         "horario_missa": horario,
         "cor_tema": cor_do_tema(linha.get("COR_LITURGICA", "")),
-        "antifona_entrada": linha.get("ANTIFONA_ENTRADA", ""),
+        "antifona_entrada": remover_glifos_invalidos(linha.get("ANTIFONA_ENTRADA", "")),
         "coleta": linha.get("COLETA", ""),
         "leitura1_ref": leitura1_ref,
         "leitura1": {
@@ -247,25 +259,25 @@ def montar_dados_para_pdf(
         "evangelho_ref": evangelho_ref,
         "evangelho_proclamacao": evangelho_proclamacao,
         "evangelho": {"texto_corrido": evangelho_texto},
-        "palavras_abertura": linha.get("PALAVRAS_ABERTURA", ""),
+        "palavras_abertura": remover_glifos_invalidos(linha.get("PALAVRAS_ABERTURA", "")),
         # Sem isso, uma data sem nenhuma fonte automática (OSM, Pocket
         # Terço nem boletim de SJC) ficava com a Seção 15/18 em branco,
         # sem explicação nenhuma — parecendo um bug ("seção não
         # capturada") em vez do que realmente é (nenhuma fonte tinha
         # essa oração pra esse dia específico). Mesmo padrão já usado
         # no Prefácio ("a critério da escolha pastoral").
-        "oferendas_texto": linha.get("OFERENDAS_TEXTO") or (
+        "oferendas_texto": remover_glifos_invalidos(linha.get("OFERENDAS_TEXTO", "")) or (
             "(nenhuma fonte automática encontrou esta oração para esta "
             "data — preencha em 'Completar Oferendas/Comunhão' ou em "
             "'Gerenciar Roteiro', Seção 15)"
         ),
-        "comunhao_texto": linha.get("COMUNHAO_TEXTO") or (
+        "comunhao_texto": remover_glifos_invalidos(linha.get("COMUNHAO_TEXTO", "")) or (
             "(nenhuma fonte automática encontrou esta oração para esta "
             "data — preencha em 'Completar Oferendas/Comunhão' ou em "
             "'Gerenciar Roteiro', Seção 18)"
         ),
         "prefacio_nome": prefacio_nome or "a critério da escolha pastoral",
-        "prefacio_texto": prefacio_texto,
+        "prefacio_texto": remover_glifos_invalidos(prefacio_texto),
         "oracao_euc": {
             "nome": nome_oracao,
             "motivo": motivo_oracao,
@@ -520,20 +532,48 @@ with aba_admin:
                     "sincronize primeiro em 'Atualizar base agora'."
                 )
 
-# Para as seções que já têm conteúdo automático gravado na planilha, mostra
-# uma prévia dele acima da caixa de override — assim o operador vê o que
-# vai acontecer se deixar a seção sem personalização.
-_COLUNA_AUTO_POR_SECAO = {
-    "02": "PALAVRAS_ABERTURA",
-    "06": "COLETA",
-    "11": "ACLAMACAO_VERSICULO",
-    "08": "LEITURA1_TEXTO",
-    "09": "SALMO_TEXTO",
-    "10": "LEITURA2_TEXTO",
-    "12": "EVANGELHO_TEXTO",
-    "15": "OFERENDAS_TEXTO",
-    "18": "COMUNHAO_TEXTO",
-}
+def _construir_previas_por_secao(dados_pdf: dict) -> dict:
+    """Prévia do texto EXATO que vai para o PDF em cada seção — depois
+    de toda a limpeza automática (números de versículo removidos,
+    saudação duplicada do Evangelho cortada, refrão do Salmo isolado,
+    caracteres quebrados removidos etc.), não o valor bruto da
+    planilha. Mostrar o valor bruto era exatamente o que causava a
+    sensação de 'nada foi corrigido' em rodadas anteriores — o operador
+    via o texto cru (com numeração, duplicidade etc.) na prévia, mesmo
+    quando o PDF gerado já saía limpo."""
+    previas = {}
+    if dados_pdf.get("palavras_abertura"):
+        previas["02"] = dados_pdf["palavras_abertura"]
+    if dados_pdf.get("antifona_entrada"):
+        previas["03"] = f"Antífona de Entrada:\n{dados_pdf['antifona_entrada']}"
+    if dados_pdf.get("coleta"):
+        previas["06"] = dados_pdf["coleta"]
+    if dados_pdf.get("leitura1", {}).get("texto_corrido"):
+        previas["08"] = dados_pdf["leitura1"]["texto_corrido"]
+    if dados_pdf.get("salmo_refrao") or dados_pdf.get("salmo", {}).get("texto_corrido"):
+        previas["09"] = (
+            f"R: {dados_pdf.get('salmo_refrao', '')}\n\n"
+            f"{dados_pdf.get('salmo', {}).get('texto_corrido', '')}"
+        )
+    if dados_pdf.get("leitura2", {}) and dados_pdf["leitura2"].get("texto_corrido"):
+        previas["10"] = dados_pdf["leitura2"]["texto_corrido"]
+    if dados_pdf.get("aclamacao_refrao") or dados_pdf.get("aclamacao_versiculo"):
+        previas["11"] = (
+            f"R: {dados_pdf.get('aclamacao_refrao') or 'Aleluia, Aleluia, Aleluia.'}\n"
+            f"V: {dados_pdf.get('aclamacao_versiculo') or ''}"
+        )
+    if dados_pdf.get("evangelho", {}).get("texto_corrido"):
+        previas["12"] = (
+            f"{dados_pdf.get('evangelho_proclamacao', '')}\n\n"
+            f"{dados_pdf['evangelho']['texto_corrido']}"
+        )
+    if dados_pdf.get("oferendas_texto"):
+        previas["15"] = dados_pdf["oferendas_texto"]
+    if dados_pdf.get("prefacio_texto"):
+        previas["16"] = f"{dados_pdf.get('prefacio_nome', '')}\n\n{dados_pdf['prefacio_texto']}"
+    if dados_pdf.get("comunhao_texto"):
+        previas["18"] = dados_pdf["comunhao_texto"]
+    return previas
 
 with aba_gerenciar:
     st.write(
@@ -561,6 +601,17 @@ with aba_gerenciar:
         overrides_atuais = carregar_overrides_secoes(conectar(), data_gerenciar, horario_gerenciar)
         chave_widget = f"{data_gerenciar.isoformat()}_{horario_gerenciar}"
 
+        with st.spinner("Calculando prévia do que o sistema capturou para cada seção..."):
+            sugestao_prefacio_previa = None
+            if not linha_gerenciar.get("PREFACIO_NOME"):
+                sugestao_prefacio_previa = sugerir_e_baixar_prefacio_automatico(
+                    linha_gerenciar, data_gerenciar
+                )
+            dados_previa = montar_dados_para_pdf(
+                linha_gerenciar, horario_gerenciar, overrides_atuais, sugestao_prefacio_previa
+            )
+        previas_por_secao = _construir_previas_por_secao(dados_previa)
+
         for secao in SECOES:
             numero, nome = secao["numero"], secao["nome"]
             personalizada = bool(overrides_atuais.get(numero))
@@ -580,12 +631,21 @@ with aba_gerenciar:
                         "Eucarística) no roteiro final."
                     )
                 else:
-                    coluna_auto = _COLUNA_AUTO_POR_SECAO.get(numero)
-                    conteudo_auto = (linha_gerenciar.get(coluna_auto) or "") if coluna_auto else ""
+                    conteudo_auto = previas_por_secao.get(numero, "")
                     if conteudo_auto:
-                        st.caption("Conteúdo automático atual (o que entra no roteiro se você não personalizar):")
-                        st.text(conteudo_auto[:500] + ("…" if len(conteudo_auto) > 500 else ""))
-                    elif numero in ("01", "03", "04", "05", "07", "11", "13", "14", "17", "20"):
+                        st.caption(
+                            "Conteúdo automático atual — exatamente como vai para o "
+                            "PDF (já limpo/formatado), se você não personalizar:"
+                        )
+                        st.text_area(
+                            "Prévia (somente leitura)",
+                            value=conteudo_auto,
+                            height=180,
+                            disabled=True,
+                            key=f"previa_{numero}_{chave_widget}",
+                            label_visibility="collapsed",
+                        )
+                    elif numero in ("01", "04", "05", "07", "13", "14", "17", "20"):
                         st.caption(
                             "Esta seção usa texto fixo do Ordinário da Missa "
                             "(diálogos padrão) — personalize aqui só se quiser "
