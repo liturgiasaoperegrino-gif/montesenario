@@ -51,9 +51,23 @@ try:
 except ImportError:  # tratado em tempo de execução — ver obter_palavras_abertura
     pdfplumber = None
 
-from scraper import MESES, HEADERS
-
 BASE_URL = "https://diocese-sjc.org.br"
+
+# Cópia local (não importa de scraper.py): scraper.py importa deste
+# módulo para as palavras de abertura, então importar de volta criaria
+# um import circular (ImportError na inicialização do Streamlit Cloud).
+MESES = {
+    1: "janeiro", 2: "fevereiro", 3: "marco", 4: "abril", 5: "maio",
+    6: "junho", 7: "julho", 8: "agosto", 9: "setembro", 10: "outubro",
+    11: "novembro", 12: "dezembro",
+}
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
 
 
 def _sem_acento(txt: str) -> str:
