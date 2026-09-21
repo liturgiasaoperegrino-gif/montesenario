@@ -153,7 +153,14 @@ def _baixar_ics(ano: int) -> Optional[str]:
     try:
         resp = requests.get(URL_ICS.format(ano=ano), headers=HEADERS, timeout=20)
         resp.raise_for_status()
-        return resp.text
+        # O servidor não declara o charset no header Content-Type, e o
+        # requests então "adivinha" (às vezes erra para latin-1/ISO-8859-1),
+        # corrompendo os emojis multibyte do SUMMARY (ex.: "🟢" virava
+        # "ð¢") — bug real visto em produção. O arquivo é sempre UTF-8
+        # (é um .ics gerado por um serviço web padrão), então força a
+        # decodificação certa a partir dos bytes brutos, ignorando
+        # qualquer charset que o requests tenha adivinhado.
+        return resp.content.decode("utf-8")
     except requests.exceptions.RequestException:
         return None
 

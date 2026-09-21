@@ -207,8 +207,8 @@ def paragrafo_versiculo(numero: str, texto: str, estilos: dict, cor_r: bool = Fa
     texto_html = texto.replace("\n", "<br/>")
     if cor_r:
         texto_html = re.sub(
-            r"(<br/>)?\s*R\.\s*$",
-            f' <font color="{COR_REFRAO}">R.</font>',
+            r"(<br/>)?\s*R[:.]\s*$",
+            f' <font color="{COR_REFRAO}">R:</font>',
             texto_html,
         )
     prefixo = (
@@ -221,11 +221,14 @@ def paragrafo_versiculo(numero: str, texto: str, estilos: dict, cor_r: bool = Fa
 def paragrafo_dialogo(falante: str, texto: str, estilos: dict) -> Paragraph:
     if not falante:
         return Paragraph(texto, estilos["rubrica"])
-    if falante == "Celebrante":
-        return Paragraph(f"<b>Celebrante:</b> {texto}", estilos["falante_padre"])
-    # "Todos" — resposta da assembleia logo após a invocação do
-    # celebrante: rótulo e texto em vermelho (estilo já com essa cor).
-    return Paragraph(f"<b>{falante}:</b> {texto}", estilos["falante_todos"])
+    if falante == "Todos":
+        # Resposta da assembleia logo após a invocação do celebrante (ou
+        # comentarista): rótulo e texto em vermelho (estilo já com essa
+        # cor).
+        return Paragraph(f"<b>{falante}:</b> {texto}", estilos["falante_todos"])
+    # Qualquer outro falante (Celebrante, Comentarista, etc.) — rótulo em
+    # negrito, texto preto e justificado, igual ao resto do relatório.
+    return Paragraph(f"<b>{falante}:</b> {texto}", estilos["falante_padre"])
 
 
 def paragrafos_com_respostas_assembleia(texto: str, estilos: dict) -> list:

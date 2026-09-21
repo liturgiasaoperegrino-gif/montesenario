@@ -39,6 +39,7 @@ from prefacios_drive import conectar_drive, listar_prefacios, baixar_texto_prefa
 from secoes_roteiro import SECOES
 from roteiro_completo import montar_pdf
 from roteiro_render import cor_do_tema
+from roteiro_fixo import intro_leitura, nome_evangelista
 
 st.set_page_config(page_title="Montesenario", page_icon="⛪", layout="centered")
 
@@ -123,9 +124,23 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
     Salmo — e usam um valor padrão razoável aqui. Se precisar do texto
     exato, o operador pode colar em 'Gerenciar Roteiro' (seções 09, 11 e
     12), que sempre tem prioridade sobre esses padrões."""
+    leitura1_ref = linha.get("LEITURA1_REF", "")
+    leitura2_ref = linha.get("LEITURA2_REF") or ""
+    evangelho_ref = linha.get("EVANGELHO_REF", "")
+
     leitura2 = None
     if linha.get("LEITURA2_TEXTO"):
-        leitura2 = {"texto_corrido": linha.get("LEITURA2_TEXTO", "")}
+        leitura2 = {
+            "texto_corrido": linha.get("LEITURA2_TEXTO", ""),
+            "intro": intro_leitura(leitura2_ref),
+        }
+
+    evangelista = nome_evangelista(evangelho_ref)
+    evangelho_proclamacao = (
+        f"Proclamação do Evangelho de Jesus Cristo † segundo {evangelista}."
+        if evangelista
+        else "Proclamação do Evangelho de Jesus Cristo."
+    )
 
     resumo_oracao = linha.get("ORACAO_EUCARISTICA_SUGERIDA") or ""
     if " — " in resumo_oracao:
@@ -140,17 +155,20 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
         "cor_tema": cor_do_tema(linha.get("COR_LITURGICA", "")),
         "antifona_entrada": linha.get("ANTIFONA_ENTRADA", ""),
         "coleta": linha.get("COLETA", ""),
-        "leitura1_ref": linha.get("LEITURA1_REF", ""),
-        "leitura1": {"texto_corrido": linha.get("LEITURA1_TEXTO", "")},
+        "leitura1_ref": leitura1_ref,
+        "leitura1": {
+            "texto_corrido": linha.get("LEITURA1_TEXTO", ""),
+            "intro": intro_leitura(leitura1_ref),
+        },
         "salmo_ref": linha.get("SALMO_REF", ""),
         "salmo_refrao": overrides.get("09_refrao", ""),
         "salmo": {"texto_corrido": linha.get("SALMO_TEXTO", "")},
-        "leitura2_ref": linha.get("LEITURA2_REF") or None,
+        "leitura2_ref": leitura2_ref or None,
         "leitura2": leitura2,
         "aclamacao_refrao": linha.get("ACLAMACAO_REFRAO") or None,
         "aclamacao_versiculo": linha.get("ACLAMACAO_VERSICULO") or None,
-        "evangelho_ref": linha.get("EVANGELHO_REF", ""),
-        "evangelho_proclamacao": "Proclamação do Evangelho de Jesus Cristo",
+        "evangelho_ref": evangelho_ref,
+        "evangelho_proclamacao": evangelho_proclamacao,
         "evangelho": {"texto_corrido": linha.get("EVANGELHO_TEXTO", "")},
         "palavras_abertura": linha.get("PALAVRAS_ABERTURA", ""),
         "oferendas_texto": linha.get("OFERENDAS_TEXTO", ""),
@@ -284,16 +302,33 @@ with aba_admin:
     with col2:
         data_fim = st.date_input("Até", value=date.today() + timedelta(days=6), key="fim")
 
+    forcar_nova_busca = st.checkbox(
+        "Forçar nova busca (sobrescreve linhas já confirmadas neste intervalo)",
+        key="forcar_nova_busca",
+        help=(
+            "Por padrão, datas já confirmadas (LEITURAS_CONFIRMADAS = SIM) "
+            "são puladas — é o que evita gastar tempo refazendo o que já "
+            "está certo. Mas isso também significa que uma linha "
+            "confirmada ANTES de uma melhoria no pipeline (ex.: Palavras "
+            "de Abertura, Aclamação ou Prefácio automáticos) nunca é "
+            "atualizada sozinha. Marque esta opção para reprocessar do "
+            "zero as datas do intervalo acima com as fontes mais "
+            "recentes, sem precisar apagar a aba inteira."
+        ),
+    )
+
     if st.button("Atualizar base agora"):
         with st.spinner("Buscando no site..."):
             resumo = sincronizar_intervalo(
                 conectar(),
                 data_inicio=data_ini,
                 data_fim=data_fim,
+                sobrescrever=forcar_nova_busca,
             )
         st.success(
             f"{resumo['novas']} linha(s) nova(s) — "
             f"{resumo['confirmadas_agora']} confirmada(s) agora — "
+            f"{resumo['sobrescritas']} sobrescrita(s) — "
             f"{resumo['ainda_pendentes']} ainda pendente(s) (fonte não "
             f"publicada)."
         )

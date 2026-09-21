@@ -373,23 +373,26 @@ def chaves_ja_gravadas(aba: gspread.Worksheet) -> set[tuple[str, str]]:
     }
 
 
-def chaves_pendentes(aba: gspread.Worksheet) -> dict[tuple[str, str], int]:
-    """Pares (data, horário) já gravados mas ainda sem confirmação (fonte
-    não publicada na última tentativa) — mapeia (data, horário) -> número
-    da linha na planilha, para serem sobrescritos assim que a fonte
-    publicar."""
+def linhas_existentes(aba: gspread.Worksheet) -> dict[tuple[str, str], int]:
+    """TODAS as combinações (data, horário) já gravadas -> número da linha,
+    independente do estado de confirmação (SIM ou NÃO) — substitui a
+    antiga chaves_pendentes() (que só cobria as NÃO confirmadas), porque
+    agora essa mesma informação também é usada no modo 'sobrescrever' de
+    sincronizar_intervalo, para ATUALIZAR a linha existente em vez de
+    duplicá-la: sem isso, forçar uma nova busca numa data já confirmada
+    criaria uma segunda linha para a mesma data/horário a cada clique,
+    em vez de substituir a antiga."""
     valores = aba.get_all_values()
     if not valores:
         return {}
     cabecalho = valores[0]
     idx_data = cabecalho.index("DATA")
     idx_horario = cabecalho.index("HORARIO")
-    idx_confirmadas = cabecalho.index("LEITURAS_CONFIRMADAS")
-    pendentes = {}
+    mapa: dict[tuple[str, str], int] = {}
     for i, linha in enumerate(valores[1:], start=2):  # linha 1 = cabeçalho
-        if len(linha) > idx_confirmadas and linha[idx_confirmadas] == "NÃO":
-            pendentes[(linha[idx_data], linha[idx_horario])] = i
-    return pendentes
+        if len(linha) > idx_horario:
+            mapa[(linha[idx_data], linha[idx_horario])] = i
+    return mapa
 
 
 def sincronizar_intervalo(
@@ -409,20 +412,31 @@ def sincronizar_intervalo(
     usa HORARIO_PADRAO_FALLBACK para não perder a data.
 
     Datas/horários com LEITURAS_CONFIRMADAS=SIM são pulados (já
-    resolvidos). Pendentes (fonte não publicada numa tentativa anterior)
-    são RETENTADOS: se a fonte já publicou, a linha existente é
-    atualizada no lugar; se continuar sem publicar, a linha pendente não
-    é duplicada. Combinações novas são adicionadas normalmente,
-    confirmadas ou não.
+    resolvidos) — A NÃO SER que `sobrescrever=True`, caso em que toda
+    data do intervalo é reprocessada do zero contra as fontes, mesmo já
+    confirmada (útil depois de uma melhoria no pipeline que só passa a
+    valer para novas buscas — ex.: Aclamação, Palavras de Abertura,
+    Prefácio automáticos — sem precisar apagar a aba inteira e perder o
+    histórico). Pendentes (fonte não publicada numa tentativa anterior)
+    são sempre RETENTADOS, com ou sem `sobrescrever`: se a fonte já
+    publicou, a linha existente é atualizada no lugar; se continuar sem
+    publicar, a linha pendente não é duplicada.
 
-    Retorna um resumo: {"novas": N, "confirmadas_agora": N, "ainda_pendentes": N}.
+    IMPORTANTE: em qualquer um desses casos — pendente confirmado agora,
+    ou `sobrescrever=True` numa data já confirmada — a linha EXISTENTE é
+    atualizada no lugar (mesmo número de linha na planilha), nunca
+    duplicada. Só combinações (data, horário) que ainda não têm
+    nenhuma linha na planilha viram linha nova.
+
+    Retorna um resumo: {"novas": N, "confirmadas_agora": N,
+    "sobrescritas": N, "ainda_pendentes": N}.
     """
     horarios_por_tipo = obter_horarios_padrao(aba)
     chaves_gravadas = set() if sobrescrever else chaves_ja_gravadas(aba)
-    pendentes = {} if sobrescrever else chaves_pendentes(aba)
+    linhas_por_chave = linhas_existentes(aba)
 
     novas_linhas = []
-    resumo = {"novas": 0, "confirmadas_agora": 0, "ainda_pendentes": 0}
+    resumo = {"novas": 0, "confirmadas_agora": 0, "sobrescritas": 0, "ainda_pendentes": 0}
 
     for item in extrair_intervalo(data_inicio, data_fim):
         dia = date.fromisoformat(item.data)
@@ -434,17 +448,21 @@ def sincronizar_intervalo(
                 continue
 
             linha = _linha_de(item, horario)
+            num_linha_existente = linhas_por_chave.get(chave)
 
-            if chave in pendentes:
+            if num_linha_existente is not None:
+                # Já existe uma linha para essa combinação (pendente de
+                # tentativa anterior, ou já confirmada e sendo
+                # reprocessada por causa de sobrescrever=True) —
+                # atualiza no lugar, nunca duplica.
                 if item.leituras_confirmadas:
-                    num_linha = pendentes[chave]
-                    ultima_coluna = rowcol_to_a1(num_linha, len(CABECALHO))
-                    primeira_coluna = rowcol_to_a1(num_linha, 1)
+                    ultima_coluna = rowcol_to_a1(num_linha_existente, len(CABECALHO))
+                    primeira_coluna = rowcol_to_a1(num_linha_existente, 1)
                     aba.update(
                         f"{primeira_coluna}:{ultima_coluna}",
                         [linha], value_input_option="USER_ENTERED",
                     )
-                    resumo["confirmadas_agora"] += 1
+                    resumo["sobrescritas" if sobrescrever else "confirmadas_agora"] += 1
                 else:
                     resumo["ainda_pendentes"] += 1
                 continue

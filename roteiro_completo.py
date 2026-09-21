@@ -124,16 +124,16 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     else:
         dialogo(fixo.SAUDACAO_INICIAL)
 
-    # 02 — Título da Solenidade / Palavras de Abertura: o título do dia
-    # litúrgico (ex.: "25º Domingo do Tempo Comum", vindo do gcatholic.org
-    # — ver gcatholic_liturgia.py) é sempre mostrado automaticamente
-    # aqui. As palavras de abertura em si vêm automaticamente para
-    # domingo (extraídas do Semanário Litúrgico da Diocese de SJC — ver
-    # palavras_abertura_sjc.py); em dia de semana, ou se a fonte ainda
-    # não publicou, ficam em branco — o operador escreve via interface.
-    # Um override manual sempre tem prioridade sobre as duas fontes.
-    secao_titulo("02", "Título da Solenidade / Palavras de Abertura")
-    story.append(Paragraph(dados["titulo_dia"].strip(), E["dia_liturgico"]))
+    # 02 — o título da seção É a própria Data Litúrgica (ex.: "25º
+    # Domingo do Tempo Comum", vindo do gcatholic.org — ver
+    # gcatholic_liturgia.py); sem rótulo genérico "Título da Solenidade /
+    # Palavras de Abertura" (suprimido a pedido do usuário). As palavras
+    # de abertura em si vêm automaticamente para domingo (extraídas do
+    # Semanário Litúrgico da Diocese de SJC — ver palavras_abertura_sjc.py);
+    # em dia de semana, ou se a fonte ainda não publicou, ficam em branco
+    # — o operador escreve via interface. Um override manual sempre tem
+    # prioridade sobre as duas fontes.
+    secao_titulo("02", dados["titulo_dia"].strip())
     over_02 = overrides.get("02")
     palavras_abertura_auto = dados.get("palavras_abertura", "")
     if over_02:
@@ -198,13 +198,21 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         paragrafos_livres(overrides["09"])
     else:
         story.append(Paragraph(
-            f'<font color="#c62828">R.</font> {dados["salmo_refrao"]}', E["refrao"]
+            f'<font color="#c62828">R:</font> {dados["salmo_refrao"]}', E["refrao"]
         ))
         if "versos" in dados["salmo"]:
             for numero, texto in dados["salmo"]["versos"]:
                 story.append(paragrafo_versiculo(numero, texto, E, cor_r=True))
         elif dados["salmo"].get("texto_corrido"):
+            # Cada estrofe do salmo é mostrada com um travessão na
+            # frente ("- texto"), no padrão pedido pelo usuário — em vez
+            # dos números de versículo destacados usados nas leituras.
             for par in dados["salmo"]["texto_corrido"].split("\n\n"):
+                par = par.strip()
+                if not par:
+                    continue
+                if not par.startswith("-"):
+                    par = f"- {par}"
                 par_html = estilizar_versiculos_inline(par.replace("\n", "<br/>"))
                 story.append(Paragraph(par_html, E["corpo"]))
 
@@ -217,11 +225,15 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         _renderizar_leitura(story, E, dados["leitura2"])
         dialogo([("", "Palavra do Senhor."), ("Todos", "Graças a Deus.")])
 
-    # 11 — Aclamação ao Evangelho
+    # 11 — Aclamação ao Evangelho: precedida do convite do comentarista e
+    # de uma subseção "Canto de Aclamação do Evangelho" (padrão pedido
+    # pelo usuário).
     secao_titulo("11", "Aclamação ao Evangelho")
     if overrides.get("11"):
         paragrafos_livres(overrides["11"])
     else:
+        dialogo([("Comentarista", fixo.CONVITE_ACLAMACAO)])
+        story.append(Paragraph("Canto de Aclamação do Evangelho", E["ref_secao"]))
         story.append(Paragraph(dados.get("aclamacao_refrao") or "Aleluia, Aleluia, Aleluia.", E["corpo"]))
         if dados.get("aclamacao_versiculo"):
             story.append(Paragraph(dados["aclamacao_versiculo"], E["corpo"]))

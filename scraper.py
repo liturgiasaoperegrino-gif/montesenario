@@ -291,10 +291,20 @@ _PADRAO_ACLAMACAO_SEM_SIMBOLO = re.compile(
 def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
     """Retorna {'refrao': str, 'versiculo': str, 'url': str} com a
     Aclamação ao Evangelho (Seção 11) do dia, ou None se a fonte não
-    responder ou não trouxer essa seção. Confirmado por inspeção manual
-    em 20/09/2026: a página traz '℟. Aleluia, Aleluia, Aleluia. ℣.
-    Vinde abrir o nosso coração...' — com fallback sem os símbolos ℟/℣
-    caso a extração de texto os perca."""
+    responder ou não trouxer essa seção.
+
+    IMPORTANTE (bug real corrigido em 20/09/2026, achado por inspeção
+    estrutural do HTML): a página NÃO tem nenhum cabeçalho "Aclamação ao
+    Evangelho" — o texto salta direto da Segunda (ou Primeira) Leitura
+    para o refrão/versículo soltos, marcados só pelos símbolos ℟./℣.,
+    antes do "Evangelho —". A versão anterior desta função procurava
+    por esse cabeçalho inexistente e por isso NUNCA encontrava nada,
+    para nenhuma data. Além disso, o Salmo Responsorial, mais acima,
+    também usa o símbolo ℟ (sozinho, sem ℣) no seu próprio refrão — por
+    isso a busca do ℟ de abertura da aclamação é feita a PARTIR do ℣
+    (que só existe uma vez na página, dentro da aclamação), pegando o
+    ℟ mais próximo ANTES dele, e não o primeiro ℟ do texto (que seria o
+    do Salmo)."""
     url = montar_url_pocketterco(dia)
     try:
         html = _baixar_html(url)
@@ -302,17 +312,27 @@ def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
             return None
         texto = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
-        bloco = _extrair_secao_pocketterco(
-            texto, "Aclamação ao Evangelho",
-            ["Evangelho —", "Evangelho -", "Profissão de Fé", "Creio"],
-        )
-        if not bloco:
-            return None
+        m_evangelho = re.search(r"^Evangelho\s*[—-]", texto, flags=re.MULTILINE)
+        janela = texto[: m_evangelho.start()] if m_evangelho else texto
 
-        m = _PADRAO_ACLAMACAO.search(bloco) or _PADRAO_ACLAMACAO_SEM_SIMBOLO.search(bloco)
-        if not m:
-            return None
-        refrao, versiculo = m.group(1).strip(), m.group(2).strip()
+        m_versiculo = re.search(r"℣\.?", janela)
+        if m_versiculo:
+            pos_refrao_ini = janela.rfind("℟", 0, m_versiculo.start())
+            if pos_refrao_ini == -1:
+                return None
+            refrao = re.sub(r"^℟\.?\s*", "", janela[pos_refrao_ini:m_versiculo.start()]).strip()
+            versiculo = janela[m_versiculo.end():].strip()
+            # Remove eventual "℟." residual no fim (repetição do refrão,
+            # confirmada na página — ex.: "...℣. <verso> ℟.").
+            versiculo = re.sub(r"\s*℟\.?\s*$", "", versiculo).strip()
+        else:
+            # Fallback para o caso (raro) de a extração de texto perder
+            # os símbolos ℟/℣ — ancora só em "Aleluia, Aleluia, Aleluia".
+            m = _PADRAO_ACLAMACAO_SEM_SIMBOLO.search(janela)
+            if not m:
+                return None
+            refrao, versiculo = m.group(1).strip(), m.group(2).strip()
+
         if not refrao:
             return None
         return {"refrao": refrao, "versiculo": versiculo, "url": url}

@@ -7,13 +7,19 @@ nenhuma fonte online porque não mudam de missa para missa (diálogos,
 Ato Penitencial, Profissão de Fé, Ritos da Comunhão, Ritos Finais).
 
 Cada seção é uma lista de (falante, texto) — falante é "Celebrante",
-"Todos" ou "" (rubrica/texto corrido sem diálogo). Isso deixa a
-renderização no gerador do roteiro simples: só iterar e aplicar o
-estilo certo por falante.
+"Comentarista", "Todos" ou "" (rubrica/texto corrido sem diálogo). Isso
+deixa a renderização no gerador do roteiro simples: só iterar e aplicar
+o estilo certo por falante (roteiro_render.paragrafo_dialogo trata
+qualquer falante que não seja "Todos" com o mesmo estilo — negrito,
+preto, justificado).
 """
 
+import re
+
 SAUDACAO_INICIAL = [
-    ("Celebrante", "Louvado Seja o Nosso Senhor Jesus Cristo!"),
+    # A saudação de abertura é feita pelo comentarista, não pelo
+    # celebrante — correção explícita do usuário.
+    ("Comentarista", "Louvado Seja o Nosso Senhor Jesus Cristo!"),
     ("Todos", "Para sempre seja louvado."),
     ("", (
         "Bom dia! Boa noite! Sejam bem-vindos todos os que estão aqui "
@@ -88,7 +94,14 @@ def dialogo_abertura_evangelho(texto_proclamacao: str) -> list:
     ]
 
 
+CONVITE_ACLAMACAO = (
+    "Fiquemos em pé e com muita alegria vamos aclamar o Santo "
+    "Evangelho, cantando."
+)
+
+
 EVANGELHO_FECHAMENTO = [
+    ("Celebrante", "Palavra da Salvação."),
     ("Todos", "Glória a vós, Senhor."),
 ]
 
@@ -166,3 +179,120 @@ RITOS_FINAIS = [
     )),
     ("Todos", "Amém."),
 ]
+
+
+# Livro bíblico (abreviação usual do Lecionário) -> linha de introdução
+# litúrgica da leitura (ex.: "Is" -> "Leitura do Livro do Profeta
+# Isaías."). Usada para gerar automaticamente a linha que precede o
+# texto de cada leitura (Primeira/Segunda Leitura), a partir só da
+# referência bíblica (ex.: "Is 55,6-9") — pedido do usuário para seguir
+# o padrão usual dos boletins litúrgicos.
+LIVROS_BIBLICOS = {
+    "Gn": "Leitura do Livro do Gênesis.",
+    "Ex": "Leitura do Livro do Êxodo.",
+    "Lv": "Leitura do Livro do Levítico.",
+    "Nm": "Leitura do Livro dos Números.",
+    "Dt": "Leitura do Livro do Deuteronômio.",
+    "Js": "Leitura do Livro de Josué.",
+    "Jz": "Leitura do Livro dos Juízes.",
+    "Rt": "Leitura do Livro de Rute.",
+    "1Sm": "Leitura do Primeiro Livro de Samuel.",
+    "2Sm": "Leitura do Segundo Livro de Samuel.",
+    "1Rs": "Leitura do Primeiro Livro dos Reis.",
+    "2Rs": "Leitura do Segundo Livro dos Reis.",
+    "1Cr": "Leitura do Primeiro Livro das Crônicas.",
+    "2Cr": "Leitura do Segundo Livro das Crônicas.",
+    "Ed": "Leitura do Livro de Esdras.",
+    "Ne": "Leitura do Livro de Neemias.",
+    "Tb": "Leitura do Livro de Tobias.",
+    "Jt": "Leitura do Livro de Judite.",
+    "Et": "Leitura do Livro de Ester.",
+    "Jo": "Leitura do Livro de Jó.",  # ambíguo com o evangelho (ver nota abaixo)
+    "Sl": "Leitura do Livro dos Salmos.",
+    "Pr": "Leitura do Livro dos Provérbios.",
+    "Ecl": "Leitura do Livro do Eclesiastes.",
+    "Ct": "Leitura do Cântico dos Cânticos.",
+    "Sb": "Leitura do Livro da Sabedoria.",
+    "Eclo": "Leitura do Livro do Eclesiástico (Ben Sirá).",
+    "Is": "Leitura do Livro do Profeta Isaías.",
+    "Jr": "Leitura do Livro do Profeta Jeremias.",
+    "Lm": "Leitura das Lamentações.",
+    "Br": "Leitura do Livro de Baruc.",
+    "Ez": "Leitura do Livro do Profeta Ezequiel.",
+    "Dn": "Leitura do Livro do Profeta Daniel.",
+    "Os": "Leitura do Livro do Profeta Oseias.",
+    "Jl": "Leitura do Livro do Profeta Joel.",
+    "Am": "Leitura do Livro do Profeta Amós.",
+    "Ab": "Leitura do Livro do Profeta Abdias.",
+    "Jn": "Leitura do Livro do Profeta Jonas.",
+    "Mq": "Leitura do Livro do Profeta Miqueias.",
+    "Na": "Leitura do Livro do Profeta Naum.",
+    "Hab": "Leitura do Livro do Profeta Habacuc.",
+    "Sf": "Leitura do Livro do Profeta Sofonias.",
+    "Ag": "Leitura do Livro do Profeta Ageu.",
+    "Zc": "Leitura do Livro do Profeta Zacarias.",
+    "Ml": "Leitura do Livro do Profeta Malaquias.",
+    "1Mc": "Leitura do Primeiro Livro dos Macabeus.",
+    "2Mc": "Leitura do Segundo Livro dos Macabeus.",
+    "At": "Leitura dos Atos dos Apóstolos.",
+    "Rm": "Leitura da Carta de São Paulo aos Romanos.",
+    "1Cor": "Leitura da Primeira Carta de São Paulo aos Coríntios.",
+    "2Cor": "Leitura da Segunda Carta de São Paulo aos Coríntios.",
+    "Gl": "Leitura da Carta de São Paulo aos Gálatas.",
+    "Ef": "Leitura da Carta de São Paulo aos Efésios.",
+    "Fl": "Leitura da Carta de São Paulo aos Filipenses.",
+    "Cl": "Leitura da Carta de São Paulo aos Colossenses.",
+    "1Ts": "Leitura da Primeira Carta de São Paulo aos Tessalonicenses.",
+    "2Ts": "Leitura da Segunda Carta de São Paulo aos Tessalonicenses.",
+    "1Tm": "Leitura da Primeira Carta de São Paulo a Timóteo.",
+    "2Tm": "Leitura da Segunda Carta de São Paulo a Timóteo.",
+    "Tt": "Leitura da Carta de São Paulo a Tito.",
+    "Fm": "Leitura da Carta de São Paulo a Filêmon.",
+    "Hb": "Leitura da Carta aos Hebreus.",
+    "Tg": "Leitura da Carta de São Tiago.",
+    "1Pd": "Leitura da Primeira Carta de São Pedro.",
+    "2Pd": "Leitura da Segunda Carta de São Pedro.",
+    "1Jo": "Leitura da Primeira Carta de São João.",
+    "2Jo": "Leitura da Segunda Carta de São João.",
+    "3Jo": "Leitura da Terceira Carta de São João.",
+    "Jd": "Leitura da Carta de São Judas.",
+    "Ap": "Leitura do Livro do Apocalipse.",
+}
+
+# Evangelho (abreviação) -> nome do evangelista, para a linha
+# "Proclamação do Evangelho de Jesus Cristo † segundo <Evangelista>."
+EVANGELISTAS = {
+    "Mt": "Mateus",
+    "Mc": "Marcos",
+    "Lc": "Lucas",
+    "Jo": "João",
+}
+
+_PADRAO_ABREVIACAO = re.compile(r"^\s*([1-3]?\s*[A-Za-zÀ-ÿ]+)")
+
+
+def _abreviacao_de(ref: str) -> str:
+    """Extrai a abreviação do livro bíblico do início de uma referência
+    (ex.: 'Is 55,6-9' -> 'Is', '1Cor 12,4-11' -> '1Cor'; tolera espaço
+    opcional entre o número e o nome do livro — '1 Cor 12,4-11' também
+    funciona, já que algumas fontes formatam assim)."""
+    m = _PADRAO_ABREVIACAO.match(ref or "")
+    if not m:
+        return ""
+    return m.group(1).replace(" ", "")
+
+
+def intro_leitura(ref: str) -> str:
+    """Retorna a linha de introdução litúrgica da leitura (ex.: 'Leitura
+    do Livro do Profeta Isaías.' para 'Is 55,6-9'), a partir só da
+    referência bíblica — pedido do usuário para seguir o padrão usual
+    dos boletins ('Primeira Leitura <ref>' seguido dessa linha, depois o
+    texto). String vazia se o livro não estiver mapeado (a leitura
+    continua sendo exibida normalmente, só sem essa linha extra)."""
+    return LIVROS_BIBLICOS.get(_abreviacao_de(ref), "")
+
+
+def nome_evangelista(ref: str) -> str:
+    """Retorna o nome do evangelista a partir da referência do Evangelho
+    (ex.: 'Mateus' para 'Mt 20,1-16a'). String vazia se não reconhecido."""
+    return EVANGELISTAS.get(_abreviacao_de(ref), "")

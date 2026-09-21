@@ -104,7 +104,10 @@ def _achar_url_pdf(dia: date) -> Optional[str]:
     except requests.exceptions.RequestException:
         return None
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    # BeautifulSoup detecta o charset sozinho a partir dos bytes brutos
+    # (meta tag/BOM), mais confiável que o "chute" do requests quando o
+    # header Content-Type não declara charset explicitamente.
+    soup = BeautifulSoup(resp.content, "html.parser")
     alvo = _sem_acento(f"{dia.day:02d} de {MESES[dia.month]}").lower()
 
     for link in soup.find_all("a", href=True):
