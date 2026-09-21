@@ -339,10 +339,24 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
 
     cor_liturgica = d["cor_liturgica"] or inferir_cor_liturgica(d["titulo_dia"])
 
+    # O refrão do Salmo (Seção 09, extraído do Pocket Terço — ver
+    # scraper.extrair_salmo_pocketterco) é gravado como a PRIMEIRA linha
+    # de SALMO_TEXTO, com o marcador "R: " — em vez de criar mais uma
+    # coluna na planilha. Motivo: uma coluna nova exige atualizar a
+    # linha de cabeçalho já existente na aba (bug real que já quebrou o
+    # app duas vezes neste projeto — get_all_records() do gspread não
+    # tolera cabeçalho desatualizado/em branco). app.py reconhece esse
+    # marcador e separa o refrão das estrofes ao montar o PDF; sem o
+    # marcador (linhas antigas, de antes deste recurso, ou dias sem
+    # Salmo automático), o texto é tratado como antes.
+    salmo_texto_final = d["salmo_texto"]
+    if d["salmo_refrao_auto"]:
+        salmo_texto_final = f'R: {d["salmo_refrao_auto"]}\n\n{d["salmo_texto"]}'.strip()
+
     return [
         d["data"], horario, d["titulo_dia"], fonte_combinada, cor_liturgica, d["antifona_entrada"], d["coleta"],
         d["leitura1_ref"], d["leitura1_texto"],
-        d["salmo_ref"], d["salmo_texto"],
+        d["salmo_ref"], salmo_texto_final,
         d["leitura2_ref"], d["leitura2_texto"],
         d["evangelho_ref"], d["evangelho_texto"],
         oferendas_texto, comunhao_texto, fonte_extra,

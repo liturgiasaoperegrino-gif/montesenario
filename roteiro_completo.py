@@ -198,7 +198,7 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         paragrafos_livres(overrides["09"])
     else:
         story.append(Paragraph(
-            f'<font color="#c62828">R:</font> {dados["salmo_refrao"]}', E["refrao"]
+            f'<b><font color="#c62828">R:</font> {dados["salmo_refrao"]}</b>', E["refrao"]
         ))
         if "versos" in dados["salmo"]:
             for numero, texto in dados["salmo"]["versos"]:

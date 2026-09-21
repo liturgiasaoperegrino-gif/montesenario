@@ -192,18 +192,24 @@ _PADRAO_VERSICULO_INLINE = re.compile(r"(?<!\w)(\d{1,3})(?=[A-ZÀ-ÖØ-Ýa-zà-�
 
 
 def estilizar_versiculos_inline(texto: str) -> str:
-    """Destaca (cor + fonte menor, sem quebrar a leitura contínua) números
-    de versículo já colados ao início da palavra seguinte, sem espaço —
-    o padrão usual do texto bíblico impresso (ex.: '6Buscai o Senhor...
-    7Abandone o ímpio...'). Não mexe em números seguidos de espaço,
-    pontuação ou outro dígito (não são marcação de versículo)."""
-    return _PADRAO_VERSICULO_INLINE.sub(
-        lambda m: f'<font color="{COR_VERSICULO}" size="7">{m.group(1)}</font>',
-        texto,
-    )
+    """SUPRIME (não apenas estiliza) números de versículo já colados ao
+    início da palavra seguinte, sem espaço — o padrão usual do texto
+    bíblico impresso (ex.: '6Buscai o Senhor... 7Abandone o ímpio...').
+    Pedido explícito do usuário: a numeração de versículo não deve
+    aparecer no layout das leituras/Evangelho — nem destacada, nem lisa
+    — então o número é removido, não recolorido (nome da função mantido
+    por compatibilidade com quem já importa daqui). Não mexe em números
+    seguidos de espaço, pontuação ou outro dígito (não são marcação de
+    versículo)."""
+    return _PADRAO_VERSICULO_INLINE.sub("", texto)
 
 
 def paragrafo_versiculo(numero: str, texto: str, estilos: dict, cor_r: bool = False) -> Paragraph:
+    """Renderiza um verso/estrofe no estilo 'corpo' (justificado). O
+    número do versículo (parâmetro `numero`, vindo do formato estruturado
+    da CNBB) NÃO é mais exibido — pedido explícito do usuário para
+    suprimir toda numeração de versículo do layout — só é usado
+    internamente (`cor_r`) para localizar o fim do refrão do Salmo."""
     texto_html = texto.replace("\n", "<br/>")
     if cor_r:
         texto_html = re.sub(
@@ -211,11 +217,7 @@ def paragrafo_versiculo(numero: str, texto: str, estilos: dict, cor_r: bool = Fa
             f' <font color="{COR_REFRAO}">R:</font>',
             texto_html,
         )
-    prefixo = (
-        f'<font color="{COR_VERSICULO}" size="8">{numero}</font>&nbsp;&nbsp;'
-        if numero else ""
-    )
-    return Paragraph(prefixo + texto_html, estilos["corpo"])
+    return Paragraph(texto_html, estilos["corpo"])
 
 
 def paragrafo_dialogo(falante: str, texto: str, estilos: dict) -> Paragraph:

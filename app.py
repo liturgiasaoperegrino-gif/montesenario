@@ -148,6 +148,18 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
     else:
         nome_oracao, motivo_oracao = (resumo_oracao or "Oração Eucarística"), ""
 
+    # O refrão automático do Salmo (Pocket Terço) vem embutido como a
+    # primeira linha de SALMO_TEXTO, marcada com "R: " (ver
+    # sheets_sync._linha_de — evita precisar de mais uma coluna na
+    # planilha). Linhas antigas (sem esse recurso) não têm o marcador e
+    # seguem tratadas como texto corrido puro, como antes.
+    salmo_texto_bruto = linha.get("SALMO_TEXTO", "")
+    salmo_refrao_auto = ""
+    if salmo_texto_bruto.startswith("R:"):
+        primeira_linha, _, resto = salmo_texto_bruto.partition("\n\n")
+        salmo_refrao_auto = primeira_linha[2:].strip()
+        salmo_texto_bruto = resto
+
     return {
         "data_iso": linha["DATA"],
         "titulo_dia": linha.get("TITULO_DIA", ""),
@@ -161,8 +173,8 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
             "intro": intro_leitura(leitura1_ref),
         },
         "salmo_ref": linha.get("SALMO_REF", ""),
-        "salmo_refrao": overrides.get("09_refrao", ""),
-        "salmo": {"texto_corrido": linha.get("SALMO_TEXTO", "")},
+        "salmo_refrao": overrides.get("09_refrao") or salmo_refrao_auto,
+        "salmo": {"texto_corrido": salmo_texto_bruto},
         "leitura2_ref": leitura2_ref or None,
         "leitura2": leitura2,
         "aclamacao_refrao": linha.get("ACLAMACAO_REFRAO") or None,
@@ -173,7 +185,7 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
         "palavras_abertura": linha.get("PALAVRAS_ABERTURA", ""),
         "oferendas_texto": linha.get("OFERENDAS_TEXTO", ""),
         "comunhao_texto": linha.get("COMUNHAO_TEXTO", ""),
-        "prefacio_nome": linha.get("PREFACIO_NOME", "") or "(nenhum selecionado ainda)",
+        "prefacio_nome": linha.get("PREFACIO_NOME", "") or "a critério da escolha pastoral",
         "prefacio_texto": linha.get("PREFACIO_TEXTO", ""),
         "oracao_euc": {
             "nome": nome_oracao,

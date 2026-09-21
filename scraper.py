@@ -105,6 +105,7 @@ class LiturgiaDoDia:
     leitura1_texto: str = ""
     salmo_ref: str = ""
     salmo_texto: str = ""
+    salmo_refrao_auto: str = ""  # Seção 09 — Pocket Terço (refrão isolado do '℟.'; ver extrair_salmo_pocketterco)
     leitura2_ref: str = ""
     leitura2_texto: str = ""
     evangelho_ref: str = ""
@@ -245,13 +246,17 @@ def montar_url_pocketterco(dia: date) -> str:
 
 
 def _extrair_secao_pocketterco(texto: str, inicio: str, fins: list[str]) -> str:
-    m_ini = re.search(r"^" + re.escape(inicio) + r"\s*$", texto, flags=re.MULTILINE)
+    # IGNORECASE por segurança — a capitalização exata do cabeçalho na
+    # página pode variar ("Sobre as Oferendas" vs. "Sobre as oferendas").
+    m_ini = re.search(
+        r"^" + re.escape(inicio) + r"\s*$", texto, flags=re.MULTILINE | re.IGNORECASE
+    )
     if not m_ini:
         return ""
     resto = texto[m_ini.end():]
     fim = len(resto)
     for f in fins:
-        m_fim = re.search(r"^" + re.escape(f), resto, flags=re.MULTILINE)
+        m_fim = re.search(r"^" + re.escape(f), resto, flags=re.MULTILINE | re.IGNORECASE)
         if m_fim:
             fim = min(fim, m_fim.start())
     return resto[:fim].strip()
@@ -312,7 +317,7 @@ def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
             return None
         texto = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
-        m_evangelho = re.search(r"^Evangelho\s*[—-]", texto, flags=re.MULTILINE)
+        m_evangelho = re.search(r"^Evangelho\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
         janela = texto[: m_evangelho.start()] if m_evangelho else texto
 
         m_versiculo = re.search(r"℣\.?", janela)
@@ -336,6 +341,59 @@ def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
         if not refrao:
             return None
         return {"refrao": refrao, "versiculo": versiculo, "url": url}
+    except Exception:
+        return None
+
+
+# ============================================================
+# FONTE do Salmo Responsorial (Seção 09): Pocket Terço
+# ============================================================
+#
+# Pedido explícito do usuário: localizar o cabeçalho "Salmo
+# Responsorial" na página, depois o símbolo '℟.' — o texto que vem
+# depois dele é o refrão — e cada linha iniciada por '-' é uma
+# estrofe. O refrão não é repetido no meio das estrofes na saída (só
+# uma vez, em destaque, no início — ver roteiro_completo.py Seção 09),
+# mesmo que a fonte o repita entre elas.
+
+_PADRAO_SALMO_HEADING = re.compile(r"^Salmo Responsorial\b.*$", re.MULTILINE | re.IGNORECASE)
+_PADRAO_PROXIMA_SECAO_APOS_SALMO = re.compile(
+    r"^(Segunda Leitura|Evangelho)\s*[—-]", re.MULTILINE | re.IGNORECASE
+)
+
+
+def extrair_salmo_pocketterco(dia: date) -> Optional[dict]:
+    """Retorna {'refrao': str, 'estrofes': list[str], 'url': str} com o
+    Salmo Responsorial (Seção 09) do dia, ou None se a fonte não
+    responder ou não trouxer essa seção."""
+    url = montar_url_pocketterco(dia)
+    try:
+        html = _baixar_html(url)
+        if html is None:
+            return None
+        texto = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
+
+        m_inicio = _PADRAO_SALMO_HEADING.search(texto)
+        if not m_inicio:
+            return None
+        resto = texto[m_inicio.end():]
+
+        m_fim = _PADRAO_PROXIMA_SECAO_APOS_SALMO.search(resto)
+        janela = resto[: m_fim.start()] if m_fim else resto
+
+        m_refrao = re.search(r"℟\.?\s*(.+)", janela)
+        if not m_refrao:
+            return None
+        refrao = m_refrao.group(1).strip()
+        if not refrao:
+            return None
+
+        estrofes = [
+            e.strip() for e in re.findall(r"^-\s*(.+)$", janela, flags=re.MULTILINE)
+            if e.strip()
+        ]
+
+        return {"refrao": refrao, "estrofes": estrofes, "url": url}
     except Exception:
         return None
 
@@ -524,6 +582,19 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
         base.aclamacao_refrao = aclamacao["refrao"]
         base.aclamacao_versiculo = aclamacao["versiculo"]
         base.fonte_aclamacao = f"Pocket Terço ({aclamacao['url']})"
+
+    # Salmo Responsorial (Seção 09): Pocket Terço é a ÚNICA fonte do
+    # refrão isolado (nem CNBB nem Nova Aliança separam refrão de
+    # estrofe) — pedido explícito do usuário. Quando encontrado,
+    # SUBSTITUI o salmo_texto (CNBB/Nova Aliança) pelo formato
+    # "refrão + estrofes com '-'" já esperado por roteiro_completo.py;
+    # se não encontrado, mantém o que já veio de CNBB/Nova Aliança
+    # (texto corrido, sem refrão isolado — como já era).
+    salmo = extrair_salmo_pocketterco(dia)
+    if salmo:
+        base.salmo_refrao_auto = salmo["refrao"]
+        if salmo["estrofes"]:
+            base.salmo_texto = "\n\n".join(f"- {e}" for e in salmo["estrofes"])
 
     # Boletim da Diocese de SJC: baixado UMA VEZ, e usado para 3 coisas
     # — palavras de abertura (Seção 02, única fonte), fallback da
