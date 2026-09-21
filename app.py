@@ -152,6 +152,7 @@ def montar_dados_para_pdf(linha: dict, horario: str, overrides: dict) -> dict:
         "evangelho_ref": linha.get("EVANGELHO_REF", ""),
         "evangelho_proclamacao": "Proclamação do Evangelho de Jesus Cristo",
         "evangelho": {"texto_corrido": linha.get("EVANGELHO_TEXTO", "")},
+        "palavras_abertura": linha.get("PALAVRAS_ABERTURA", ""),
         "oferendas_texto": linha.get("OFERENDAS_TEXTO", ""),
         "comunhao_texto": linha.get("COMUNHAO_TEXTO", ""),
         "prefacio_nome": linha.get("PREFACIO_NOME", "") or "(nenhum selecionado ainda)",
@@ -263,10 +264,12 @@ with aba_consulta:
                     mime="application/pdf",
                 )
             st.caption(
-                "Confira a seção 02 (Palavras de Abertura) e a Aclamação ao "
-                "Evangelho (seção 11) antes de imprimir — esses dois trechos "
-                "ainda não vêm preenchidos automaticamente; ajuste em "
-                "'Gerenciar Roteiro' se precisar."
+                "Confira a Aclamação ao Evangelho (seção 11) antes de "
+                "imprimir — ainda não vem preenchida automaticamente. Aos "
+                "domingos, a seção 02 (Palavras de Abertura) já vem "
+                "preenchida a partir do Semanário da Diocese de SJC; em "
+                "dia de semana, ou se ainda não vier, ajuste em "
+                "'Gerenciar Roteiro'."
             )
 
 with aba_admin:
@@ -393,6 +396,7 @@ with aba_admin:
 # uma prévia dele acima da caixa de override — assim o operador vê o que
 # vai acontecer se deixar a seção sem personalização.
 _COLUNA_AUTO_POR_SECAO = {
+    "02": "PALAVRAS_ABERTURA",
     "06": "COLETA",
     "08": "LEITURA1_TEXTO",
     "09": "SALMO_TEXTO",

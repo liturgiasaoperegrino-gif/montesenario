@@ -41,6 +41,9 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
+from gcatholic_liturgia import obter_dia_liturgico
+from palavras_abertura_sjc import obter_palavras_abertura
+
 BASE_URL_NOVAALIANCA = "https://novaalianca.com.br"
 BASE_URL_CNBB_API = "https://api-liturgia.edicoescnbb.com.br/contents/in/date"
 BASE_URL_POCKETTERCO = "https://pocketterco.com.br/liturgia"
@@ -108,6 +111,8 @@ class LiturgiaDoDia:
     evangelho_texto: str = ""
     leituras_confirmadas: bool = True
     aviso_fonte: str = ""
+    palavras_abertura: str = ""  # só domingo — ver palavras_abertura_sjc.py
+    fonte_palavras_abertura: str = ""  # URL do boletim usado, se achou
 
 
 def _fatiar_por_marcadores(texto: str, marcadores: list, case_sensitive_fim: bool = False) -> dict[str, str]:
@@ -170,6 +175,14 @@ def extrair_liturgia_cnbb(dia: date) -> Optional[LiturgiaDoDia]:
             titulo_div.get_text(" ", strip=True) if titulo_div
             else dados.get("title", "")
         )
+        # O campo genérico "title" da API da CNBB é o nome da série de
+        # conteúdo ("Liturgia Diária"), não o dia litúrgico específico —
+        # nunca deve aparecer no roteiro. Tratado como "sem título" para
+        # cair no Nova Aliança (fonte alternativa) ou, o mais comum, ser
+        # sobrescrito pelo gcatholic.org logo abaixo em
+        # extrair_liturgia_do_dia.
+        if titulo_dia.strip().lower() == "liturgia diária":
+            titulo_dia = ""
 
         refs = _refs_da_cnbb(dados.get("leituras", ""))
         leitura1_ref = refs[0] if len(refs) > 0 else ""
@@ -382,7 +395,21 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
     Aliança não (comum: CNBB parece não depender de "publicação" por
     dia, enquanto o Nova Aliança sim), as leituras ficam confirmadas
     mesmo assim — só a Antífona/Coleta ficam pendentes, registrado em
-    aviso_fonte sem bloquear o resto."""
+    aviso_fonte sem bloquear o resto.
+
+    TÍTULO DO DIA e COR LITÚRGICA: a CNBB às vezes fica indisponível
+    ("barreira CNBB") e o Nova Aliança nem sempre traz o título no
+    formato padronizado nem a cor. Por isso, depois de montar `base`
+    com as leituras, o gcatholic.org (gcatholic_liturgia.py) é SEMPRE
+    consultado e, quando responde, tem prioridade sobre CNBB/Nova
+    Aliança para titulo_dia e cor_liturgica — é a fonte mais confiável
+    e no formato exato pedido (ex.: "25º Domingo do Tempo Comum").
+
+    PALAVRAS DE ABERTURA: só existem para domingo, extraídas do
+    Semanário Litúrgico da Diocese de SJC (palavras_abertura_sjc.py).
+    Em dia de semana, ou se a fonte não tiver publicado ainda, fica
+    vazio — a Seção 02 do roteiro continua em branco pra preencher à
+    mão nesse caso, como já era."""
     cnbb = extrair_liturgia_cnbb(dia)
     novaalianca = extrair_liturgia_novaalianca(dia)  # sempre tentado: única fonte de antífona/coleta
 
@@ -419,6 +446,16 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
             "ainda não disponíveis: o Nova Aliança (única fonte dessas "
             "duas orações) não publicou esta data ainda."
         )
+
+    dia_gcatholic = obter_dia_liturgico(dia)
+    if dia_gcatholic:
+        base.titulo_dia = dia_gcatholic["titulo"]
+        base.cor_liturgica = dia_gcatholic["cor"]
+
+    abertura = obter_palavras_abertura(dia)
+    if abertura:
+        base.palavras_abertura = abertura["texto"]
+        base.fonte_palavras_abertura = abertura["url"]
 
     return base
 

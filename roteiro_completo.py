@@ -107,8 +107,9 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     horario = _override_ou(overrides, "00", dados.get("horario_missa", ""))
 
     story.append(Paragraph("Montesenario", E["titulo"]))
+    story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino", E["subtitulo_data"]))
     story.append(Paragraph(
-        f"Roteiro da Missa — {data_fmt}" + (f" — {horario}" if horario else ""),
+        f"{data_fmt}" + (f" — {horario}" if horario else ""),
         E["subtitulo_data"],
     ))
     story.append(HRFlowable(width="100%", thickness=1, color=dados["cor_tema"], spaceAfter=10))
@@ -123,15 +124,21 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         dialogo(fixo.SAUDACAO_INICIAL)
 
     # 02 — Título da Solenidade / Palavras de Abertura: o título do dia
-    # litúrgico (ex.: "25º Domingo do Tempo Comum") é sempre mostrado
-    # automaticamente aqui; já as palavras de abertura em si ficam EM
-    # BRANCO por padrão — o operador escreve via interface (sem
-    # override, mostra um aviso discreto em vez de texto genérico).
+    # litúrgico (ex.: "25º Domingo do Tempo Comum", vindo do gcatholic.org
+    # — ver gcatholic_liturgia.py) é sempre mostrado automaticamente
+    # aqui. As palavras de abertura em si vêm automaticamente para
+    # domingo (extraídas do Semanário Litúrgico da Diocese de SJC — ver
+    # palavras_abertura_sjc.py); em dia de semana, ou se a fonte ainda
+    # não publicou, ficam em branco — o operador escreve via interface.
+    # Um override manual sempre tem prioridade sobre as duas fontes.
     secao_titulo("02", "Título da Solenidade / Palavras de Abertura")
     story.append(Paragraph(dados["titulo_dia"].strip(), E["dia_liturgico"]))
     over_02 = overrides.get("02")
+    palavras_abertura_auto = dados.get("palavras_abertura", "")
     if over_02:
         paragrafos_livres(over_02)
+    elif palavras_abertura_auto:
+        paragrafos_livres(palavras_abertura_auto)
     else:
         story.append(Paragraph(
             "(a preencher — use a tela \"Gerenciar Roteiro\" para inserir "

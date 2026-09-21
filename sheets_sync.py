@@ -56,6 +56,7 @@ CABECALHO = [
     "PREFACIO_NOME", "PREFACIO_TEXTO",
     "LEITURAS_CONFIRMADAS", "AVISO_FONTE",
     "URL_FONTE",
+    "PALAVRAS_ABERTURA", "FONTE_PALAVRAS_ABERTURA",
     "SECOES_OVERRIDE",
 ]
 
@@ -300,6 +301,7 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
             "", "",
             "NÃO", d["aviso_fonte"],
             d["url_fonte"],
+            "", "",
             "{}",
         ]
 
@@ -339,6 +341,7 @@ def _linha_de(item: LiturgiaDoDia, horario: str) -> list[str]:
         "", "",
         "SIM", d["aviso_fonte"],
         d["url_fonte"],
+        d["palavras_abertura"], d["fonte_palavras_abertura"],
         "{}",
     ]
 
