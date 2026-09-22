@@ -14,12 +14,28 @@ qualquer falante que não seja "Todos" com o mesmo estilo — negrito,
 preto, justificado).
 """
 
+import os
 import re
 
-# Logo oficial da Igreja São Peregrino — usado no cabeçalho do app
-# (app.py) e no topo do PDF gerado (roteiro_completo.py). Fonte única
-# pra trocar em um lugar só, se um dia mudar de novo.
-LOGO_URL = "https://i.ibb.co/HLqFZgZK/logo-igreja.jpg"
+# Logos — arquivos LOCAIS dentro do projeto (pasta assets/), não mais
+# baixados de um link externo (ibb.co). Motivo (pedido do usuário em
+# 22/09/2026): baixar da internet toda vez que o PDF é gerado depende
+# do site responder rápido, e não dá controle sobre a resolução/
+# compressão que o host de imagens aplicou — um arquivo local é mais
+# rápido, mais confiável e com a qualidade exata que for enviada aqui.
+# Caminho calculado a partir da localização deste arquivo (não do
+# diretório de trabalho), pra funcionar não importa de onde o app/
+# script for rodado.
+_DIR_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+
+# Logo da Igreja São Peregrino — usado no cabeçalho do app (app.py) e
+# do lado ESQUERDO do cabeçalho do PDF gerado (roteiro_completo.py).
+LOGO_IGREJA_PATH = os.path.join(_DIR_ASSETS, "logo_igreja.jpg")
+
+# Brasão da Ordem dos Servos de Maria, Província São Peregrino do
+# Brasil — usado só no PDF, do lado DIREITO do cabeçalho (pedido do
+# usuário em 22/09/2026).
+LOGO_OSM_PATH = os.path.join(_DIR_ASSETS, "logo_osm.jpg")
 
 SAUDACAO_INICIAL = [
     # A saudação de abertura é feita pelo comentarista, não pelo

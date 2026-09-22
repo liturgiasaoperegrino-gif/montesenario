@@ -29,13 +29,14 @@ Duas coisas que valem destacar:
 
 from __future__ import annotations
 
-import io
+import os
 
-import requests
 from PIL import Image as PILImage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Image
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Image, Table, TableStyle,
+)
 
 import roteiro_fixo as fixo
 from roteiro_render import (
@@ -46,15 +47,22 @@ from roteiro_render import (
 )
 
 
-def _baixar_logo_para_pdf():
-    """Baixa o logo (fixo.LOGO_URL) como bytes em memória, prontos pro
-    reportlab.platypus.Image. Retorna None em qualquer falha de rede —
-    o PDF é gerado normalmente sem o logo nesse caso, em vez de quebrar
-    a geração inteira por causa de uma imagem."""
+def _imagem_proporcional(caminho: str, largura_alvo: float):
+    """Abre um arquivo de imagem LOCAL e devolve um reportlab.platypus.
+    Image com essa `largura_alvo` e a altura calculada proporcionalmente
+    ao tamanho real do arquivo (nunca estica/comprime — bug real
+    corrigido em 22/09/2026, quando largura e altura fixas e iguais
+    distorciam qualquer logo que não fosse quadrado). Retorna None se o
+    arquivo não existir ou não puder ser lido como imagem — o cabeçalho
+    do PDF é montado sem esse logo nesse caso, em vez de quebrar a
+    geração inteira por causa de uma imagem."""
+    if not caminho or not os.path.isfile(caminho):
+        return None
     try:
-        resp = requests.get(fixo.LOGO_URL, timeout=10)
-        resp.raise_for_status()
-        return io.BytesIO(resp.content)
+        with PILImage.open(caminho) as img:
+            largura_px, altura_px = img.size
+        altura_alvo = largura_alvo * (altura_px / largura_px)
+        return Image(caminho, width=largura_alvo, height=altura_alvo)
     except Exception:
         return None
 
@@ -125,31 +133,30 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     data_fmt = f"{dados['data_iso'][8:10]}/{dados['data_iso'][5:7]}/{dados['data_iso'][0:4]}"
     horario = _override_ou(overrides, "00", dados.get("horario_missa", ""))
 
-    logo_bytes = _baixar_logo_para_pdf()
-    if logo_bytes:
-        try:
-            # BUG REAL corrigido em 22/09/2026 (relatado pelo usuário): a
-            # 1ª versão forçava width=height=2.5cm, ignorando a proporção
-            # real da imagem — como o logo não é quadrado, ficava
-            # esticado/distorcido. Lê o tamanho de verdade com PIL e
-            # calcula a altura proporcional para uma largura fixa, em vez
-            # de forçar os dois lados a valores iguais.
-            largura_alvo = 2.5 * cm
-            largura_px, altura_px = PILImage.open(logo_bytes).size
-            logo_bytes.seek(0)
-            altura_alvo = largura_alvo * (altura_px / largura_px)
-
-            imagem_logo = Image(logo_bytes, width=largura_alvo, height=altura_alvo)
-            # Alinhado à ESQUERDA do cabeçalho (pedido do usuário) — o
-            # padrão do reportlab pra hAlign já seria "LEFT", mas fica
-            # explícito porque a 1ª versão tinha forçado "CENTER".
-            imagem_logo.hAlign = "LEFT"
-            story.append(imagem_logo)
-            story.append(Spacer(1, 6))
-        except Exception:
-            # Bytes baixados mas reportlab/PIL não conseguiram decodificar
-            # como imagem (formato inesperado etc.) — segue sem o logo.
-            pass
+    # Dois logos no cabeçalho (pedido do usuário em 22/09/2026): o da
+    # Igreja São Peregrino à ESQUERDA, o brasão da Ordem dos Servos de
+    # Maria (Província São Peregrino do Brasil) à DIREITA — os dois
+    # como arquivo local (ver comentário de LOGO_IGREJA_PATH/
+    # LOGO_OSM_PATH em roteiro_fixo.py) e sem distorcer a proporção
+    # original de nenhum dos dois (_imagem_proporcional).
+    largura_logo = 2.5 * cm
+    logo_igreja = _imagem_proporcional(fixo.LOGO_IGREJA_PATH, largura_logo)
+    logo_osm = _imagem_proporcional(fixo.LOGO_OSM_PATH, largura_logo)
+    if logo_igreja or logo_osm:
+        largura_coluna = doc.width / 2
+        linha_logos = [[logo_igreja or "", logo_osm or ""]]
+        tabela_logos = Table(linha_logos, colWidths=[largura_coluna, largura_coluna])
+        tabela_logos.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (0, 0), "LEFT"),
+            ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(tabela_logos)
+        story.append(Spacer(1, 6))
 
     story.append(Paragraph("Montesenario", E["titulo"]))
     story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino", E["subtitulo_data"]))

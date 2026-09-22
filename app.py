@@ -47,9 +47,9 @@ from roteiro_render import (
     cor_do_tema, limpar_texto_leitura, separar_refrao_estrofes_salmo,
     remover_glifos_invalidos,
 )
-from roteiro_fixo import intro_leitura, nome_evangelista, LOGO_URL
+from roteiro_fixo import intro_leitura, nome_evangelista, LOGO_IGREJA_PATH
 
-st.set_page_config(page_title="Montesenario", page_icon=LOGO_URL, layout="centered")
+st.set_page_config(page_title="Montesenario", page_icon=LOGO_IGREJA_PATH, layout="centered")
 
 
 @st.cache_resource
@@ -313,7 +313,7 @@ def montar_dados_para_pdf(
 
 col_logo, col_titulo = st.columns([1, 6])
 with col_logo:
-    st.image(LOGO_URL, width=70)
+    st.image(LOGO_IGREJA_PATH, width=70)
 with col_titulo:
     st.title("Montesenario")
 st.caption("Consulta de leituras e orações da missa do dia")
