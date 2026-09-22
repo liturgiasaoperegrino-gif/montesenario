@@ -181,9 +181,29 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     # como arquivo local (ver comentário de LOGO_IGREJA_PATH/
     # LOGO_OSM_PATH em roteiro_fixo.py) e sem distorcer a proporção
     # original de nenhum dos dois (_imagem_proporcional).
+    # MUDANÇA DE ESTRATÉGIA (pedido do usuário em 22/09/2026, 4ª rodada):
+    # em vez de logos numa linha separada e o bloco de título/subtítulo
+    # embaixo (o que sempre deixava algum tipo de folga/desalinhamento
+    # entre os dois, mesmo depois de ajustar VALIGN e recortar a margem
+    # branca dos arquivos), os logos e o bloco de texto agora formam UMA
+    # ÚNICA linha de tabela — logo da Igreja | título+subtítulos | logo
+    # da OSM — com VALIGN="MIDDLE". Isso "sobe" o texto para ocupar a
+    # mesma faixa vertical dos logos (a altura da linha vira a do logo
+    # mais alto), em vez de vir depois deles, e garante alinhamento sem
+    # precisar acertar nenhuma medida manualmente.
     largura_logo = 2.5 * cm
     logo_igreja = _imagem_proporcional(fixo.LOGO_IGREJA_PATH, largura_logo)
     logo_osm = _imagem_proporcional(fixo.LOGO_OSM_PATH, largura_logo)
+
+    bloco_titulo = [
+        Paragraph("Montesenario", E["titulo"]),
+        Paragraph("Semanário Litúrgico da Igreja São Peregrino", E["subtitulo_data"]),
+        Paragraph(
+            "São José dos Campos-SP — " + f"{data_fmt}" + (f" — {horario}" if horario else ""),
+            E["subtitulo_data"],
+        ),
+    ]
+
     if logo_igreja or logo_osm:
         # BUG REAL corrigido em 22/09/2026 (relatado pelo usuário: alinhar
         # os logos à linha horizontal/ao texto): o Frame padrão do
@@ -196,36 +216,29 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         # do título/linha. Descontando os 2×6pt, a tabela ocupa
         # exatamente a mesma largura útil que tudo mais no documento.
         largura_util = doc.width - 12
-        largura_coluna = largura_util / 2
-        linha_logos = [[logo_igreja or "", logo_osm or ""]]
-        tabela_logos = Table(linha_logos, colWidths=[largura_coluna, largura_coluna])
-        tabela_logos.setStyle(TableStyle([
+        largura_coluna_logo = largura_logo
+        largura_coluna_titulo = largura_util - 2 * largura_coluna_logo
+        linha_cabecalho = [[logo_igreja or "", bloco_titulo, logo_osm or ""]]
+        tabela_cabecalho = Table(
+            linha_cabecalho,
+            colWidths=[largura_coluna_logo, largura_coluna_titulo, largura_coluna_logo],
+        )
+        tabela_cabecalho.setStyle(TableStyle([
             ("ALIGN", (0, 0), (0, 0), "LEFT"),
-            ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-            # BUG REAL corrigido em 22/09/2026 (2ª rodada): como os dois
-            # logos têm proporções diferentes (a largura é igual, mas a
-            # altura de cada um é calculada proporcionalmente ao arquivo
-            # original — ver _imagem_proporcional), VALIGN="TOP" alinhava
-            # só o topo dos dois, deixando a base do logo mais baixo (o
-            # da Ordem dos Servos de Maria) sobrando abaixo do outro,
-            # fora do nível do texto/linha horizontal abaixo. Com
-            # VALIGN="BOTTOM" as bases dos dois ficam no mesmo nível,
-            # coladas ao texto/linha que vem em seguida.
-            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+            ("ALIGN", (1, 0), (1, 0), "CENTER"),
+            ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 0),
             ("RIGHTPADDING", (0, 0), (-1, -1), 0),
             ("TOPPADDING", (0, 0), (-1, -1), 0),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ]))
-        story.append(tabela_logos)
+        story.append(tabela_cabecalho)
         story.append(Spacer(1, 6))
+    else:
+        for flowable in bloco_titulo:
+            story.append(flowable)
 
-    story.append(Paragraph("Montesenario", E["titulo"]))
-    story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino", E["subtitulo_data"]))
-    story.append(Paragraph(
-        "São José dos Campos-SP — " + f"{data_fmt}" + (f" — {horario}" if horario else ""),
-        E["subtitulo_data"],
-    ))
     story.append(HRFlowable(width="100%", thickness=1, color=dados["cor_tema"], spaceAfter=10))
     # O título do dia litúrgico NÃO se repete aqui — aparece só uma vez,
     # na Seção 02 (ver abaixo), já na versão corrigida/convertida.
