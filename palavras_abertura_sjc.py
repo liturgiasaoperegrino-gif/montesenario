@@ -201,10 +201,20 @@ def _extrair_oferendas(texto_pdf: str) -> str:
     'ORAÇÃO SOBRE AS OFERENDAS' (isso era um chute de uma rodada
     anterior, nunca confirmado contra o PDF de verdade) — é uma
     anotação entre parênteses, '(Sobre as Oferendas)', sem a palavra
-    'Oração' na frente. Por isso a seção nunca era encontrada."""
-    m_ini = re.search(r"\(\s*Sobre\s+as\s+Ofere[nm]das\s*\)", texto_pdf, flags=re.IGNORECASE)
+    'Oração' na frente. Por isso a seção nunca era encontrada.
+
+    BUG REAL corrigido em 21/09/2026 (2ª rodada, com o boletim de
+    verdade de 27/09/2026): nem toda edição usa a anotação entre
+    parênteses — algumas trazem só o cabeçalho numerado direto
+    ('13. ORAÇÃO SOBRE AS OFERENDAS', sem o '(Sobre as Oferendas)').
+    Aceita os dois formatos."""
+    m_ini = re.search(
+        r"\(\s*Sobre\s+as\s+Ofere[nm]das\s*\)"
+        r"|\d{1,2}\s*[.\-–]\s*ORA[ÇC][ÃA]O\s+SOBRE\s+AS\s+OFERE[NM]DAS",
+        texto_pdf, flags=re.IGNORECASE,
+    )
     if not m_ini:
-        raise ValueError("cabeçalho '(Sobre as Oferendas)' não encontrado")
+        raise ValueError("cabeçalho da Oração sobre as Oferendas não encontrado")
     resto = texto_pdf[m_ini.end():]
     m_fim = _PROXIMO_CABECALHO.search(resto)
     bloco = (resto[: m_fim.start()] if m_fim else resto).strip()
@@ -224,10 +234,19 @@ def _extrair_comunhao(texto_pdf: str) -> str:
     21/09/2026): anotação entre parênteses, sem a palavra 'Oração' na
     frente. Delimitado pelo conteúdo em si ('Oremos' ... 'Amém'),
     informado pelo usuário, em vez de só o próximo cabeçalho numerado —
-    mais resistente a essa seção vir emendada com a coluna vizinha."""
-    m_ini = re.search(r"\(\s*Depois\s+da\s+Comunh[ãa]o\s*\)", texto_pdf, flags=re.IGNORECASE)
+    mais resistente a essa seção vir emendada com a coluna vizinha.
+
+    BUG REAL corrigido em 21/09/2026 (2ª rodada, com o boletim de
+    verdade de 27/09/2026): esta edição não tem a anotação entre
+    parênteses nenhuma — só o cabeçalho numerado direto ('18. ORAÇÃO
+    DEPOIS DA COMUNHÃO'). Aceita os dois formatos."""
+    m_ini = re.search(
+        r"\(\s*Depois\s+da\s+Comunh[ãa]o\s*\)"
+        r"|\d{1,2}\s*[.\-–]\s*ORA[ÇC][ÃA]O\s+DEPOIS\s+DA\s+COMUNH[ÃA]O",
+        texto_pdf, flags=re.IGNORECASE,
+    )
     if not m_ini:
-        raise ValueError("cabeçalho '(Depois da Comunhão)' não encontrado")
+        raise ValueError("cabeçalho da Oração Depois da Comunhão não encontrado")
     resto = texto_pdf[m_ini.end():]
     m_oremos = re.search(r"\bOremos\b", resto, flags=re.IGNORECASE)
     if not m_oremos:
@@ -268,7 +287,13 @@ def _extrair_prefacio(texto_pdf: str) -> dict:
     if not texto_prefacio:
         raise ValueError("texto do Prefácio veio vazio")
 
-    return {"nome": m_nome.group(1).strip(), "texto": texto_prefacio}
+    # BUG REAL encontrado em 21/09/2026 (boletim real de 27/09/2026):
+    # quando o nome do Prefácio é longo, ele quebra em duas linhas
+    # físicas na página (ex.: "(Prefácio dos Domingos do Tempo Comum" /
+    # "VII – MR, pág. 480)") — sem normalizar, o "\n" entre as duas
+    # linhas ia parar dentro do nome gravado na planilha.
+    nome_prefacio = re.sub(r"\s+", " ", m_nome.group(1)).strip()
+    return {"nome": nome_prefacio, "texto": texto_prefacio}
 
 
 def _agrupar_em_linhas(palavras: list, tolerancia: float = 3.0) -> list:
@@ -327,8 +352,36 @@ def _extrair_texto_pagina_pdf(page) -> str:
     if not esquerda or not direita or classificadas < 0.9 * len(palavras):
         return page.extract_text() or ""
 
-    lacuna = min(p["x0"] for p in direita) - max(p["x1"] for p in esquerda)
-    if lacuna < page.width * 0.03:
+    # BUG REAL encontrado em 21/09/2026 com o boletim de verdade de
+    # 27/09/2026 (o próprio arquivo, não mais um exemplo simulado): a
+    # lacuna entre colunas era medida pelo par de palavras mais PRÓXIMO
+    # da página inteira (min x0 da direita − max x1 da esquerda). Um
+    # único par isolado que, por hifenização/pontuação/justificação,
+    # ficasse mais perto do meio que o normal já derrubava essa medida
+    # — e como o teste de sanidade abaixo exigia pelo menos 3% da
+    # largura da página, essa página (cuja lacuna real entre colunas é
+    # de ~14pt, menor que os ~18pt exigidos) caía no "não são duas
+    # colunas de verdade" e usava page.extract_text() puro — voltando a
+    # intercalar o texto das duas colunas linha a linha (exatamente o
+    # bug original que essa função existe pra evitar). Corrigido:
+    # calcula a lacuna LINHA A LINHA (só nas linhas que realmente têm
+    # palavra dos dois lados) e usa a MEDIANA — resistente a esse tipo
+    # de outlier isolado — com um limiar bem mais baixo (a lacuna real
+    # entre colunas varia de boletim pra boletim; o que importa é ela
+    # ser claramente maior que um espaço comum entre palavras, ~3-5pt).
+    gaps_por_linha = []
+    for linha in _agrupar_em_linhas(palavras):
+        esq_da_linha = [p for p in linha if p["x1"] <= meio]
+        dir_da_linha = [p for p in linha if p["x0"] >= meio]
+        if esq_da_linha and dir_da_linha:
+            gaps_por_linha.append(
+                min(p["x0"] for p in dir_da_linha) - max(p["x1"] for p in esq_da_linha)
+            )
+    if not gaps_por_linha:
+        return page.extract_text() or ""
+    gaps_por_linha.sort()
+    lacuna = gaps_por_linha[len(gaps_por_linha) // 2]  # mediana
+    if lacuna < page.width * 0.01:
         return page.extract_text() or ""
 
     # BUG REAL corrigido em 21/09/2026 (relatado pelo usuário): um
