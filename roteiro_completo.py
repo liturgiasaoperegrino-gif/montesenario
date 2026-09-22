@@ -29,9 +29,11 @@ Duas coisas que valem destacar:
 
 from __future__ import annotations
 
+import functools
 import os
+import tempfile
 
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageChops
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.platypus import (
@@ -47,18 +49,58 @@ from roteiro_render import (
 )
 
 
+@functools.lru_cache(maxsize=8)
+def _recortar_margens_brancas(caminho: str) -> str:
+    """Corta a margem branca/vazia ao redor do desenho de verdade dentro
+    do arquivo de logo, devolvendo o caminho de uma cópia já recortada
+    (ou o caminho original, sem alterar nada, se não der pra recortar).
+
+    BUG REAL corrigido em 22/09/2026 (3ª rodada — usuário reportou
+    'alinhamento vertical incorreto' mesmo depois do VALIGN='BOTTOM'):
+    os dois arquivos de logo têm margens internas BEM diferentes — o da
+    Igreja São Peregrino tem ~9% de espaço em branco sobrando embaixo do
+    desenho dentro do próprio arquivo, o da Ordem dos Servos de Maria só
+    ~2%. Alinhar pela base do ARQUIVO (o retângulo inteiro da imagem,
+    bounding box) não alinha pela base do DESENHO visível — a margem
+    desigual de cada arquivo desloca o desenho de um em relação ao
+    outro, mesmo com VALIGN='BOTTOM' certo na tabela. Recortando cada
+    imagem para sua própria área de conteúdo visível ANTES de calcular
+    a largura/altura proporcional, a base do desenho passa a coincidir
+    com a base da caixa da imagem nos dois casos — e aí sim o
+    alinhamento pela base da tabela alinha o desenho de verdade.
+    """
+    try:
+        with PILImage.open(caminho) as img:
+            rgb = img.convert("RGB")
+            fundo = PILImage.new("RGB", rgb.size, (255, 255, 255))
+            diferenca = ImageChops.difference(rgb, fundo).convert("L")
+            diferenca = diferenca.point(lambda p: 255 if p > 15 else 0)
+            bbox = diferenca.getbbox()
+            if not bbox:
+                return caminho
+            recortada = img.crop(bbox)
+            nome_tmp = "montesenario_logo_recortado_" + os.path.basename(caminho)
+            caminho_tmp = os.path.join(tempfile.gettempdir(), nome_tmp)
+            recortada.save(caminho_tmp)
+            return caminho_tmp
+    except Exception:
+        return caminho
+
+
 def _imagem_proporcional(caminho: str, largura_alvo: float):
-    """Abre um arquivo de imagem LOCAL e devolve um reportlab.platypus.
-    Image com essa `largura_alvo` e a altura calculada proporcionalmente
-    ao tamanho real do arquivo (nunca estica/comprime — bug real
-    corrigido em 22/09/2026, quando largura e altura fixas e iguais
-    distorciam qualquer logo que não fosse quadrado). Retorna None se o
-    arquivo não existir ou não puder ser lido como imagem — o cabeçalho
-    do PDF é montado sem esse logo nesse caso, em vez de quebrar a
-    geração inteira por causa de uma imagem."""
+    """Abre um arquivo de imagem LOCAL (já com as margens brancas
+    recortadas — ver _recortar_margens_brancas) e devolve um
+    reportlab.platypus.Image com essa `largura_alvo` e a altura
+    calculada proporcionalmente ao tamanho real do arquivo (nunca
+    estica/comprime — bug real corrigido em 22/09/2026, quando largura
+    e altura fixas e iguais distorciam qualquer logo que não fosse
+    quadrado). Retorna None se o arquivo não existir ou não puder ser
+    lido como imagem — o cabeçalho do PDF é montado sem esse logo nesse
+    caso, em vez de quebrar a geração inteira por causa de uma imagem."""
     if not caminho or not os.path.isfile(caminho):
         return None
     try:
+        caminho = _recortar_margens_brancas(caminho)
         with PILImage.open(caminho) as img:
             largura_px, altura_px = img.size
         altura_alvo = largura_alvo * (altura_px / largura_px)
