@@ -421,6 +421,70 @@ def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
 
 
 # ============================================================
+# FONTE alternativa da Segunda Leitura (Seção 10): Pocket Terço
+# ============================================================
+#
+# Pedido do usuário em 21/09/2026 (3ª rodada de bugs do dia): mesmo
+# depois de tornar os marcadores de CNBB e Nova Aliança tolerantes a
+# variação de maiúscula e quebra de linha, o versículo da Aclamação ao
+# Evangelho ainda apareceu colado ao final da 2ª Leitura em pelo menos
+# um dia real, ANTES do "Palavra do Senhor." — um jeito de vazar que
+# não bate com nenhum dos dois bugs já corrigidos nessas duas fontes, e
+# que não dá pra confirmar sem a página publicada daquele dia (rede
+# bloqueada neste ambiente). Em vez de caçar mais um caso, a 2ª Leitura
+# passa a usar o Pocket Terço como fonte alternativa (substitui
+# CNBB/Nova Aliança quando responder) — a mesma página, com a mesma
+# técnica de janela entre marcadores, já usada com sucesso para isolar
+# a Aclamação (Seção 11).
+
+def extrair_leitura2_pocketterco(dia: date) -> Optional[dict]:
+    """Retorna {'ref': str, 'texto': str, 'url': str} com a Segunda
+    Leitura (Seção 10) do dia, ou None se a fonte não responder ou não
+    tiver Segunda Leitura nesse dia (nem todo dia tem)."""
+    url = montar_url_pocketterco(dia)
+    try:
+        html = _baixar_html(url)
+        if html is None:
+            return None
+        texto = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
+
+        m_ini = re.search(
+            r"^Segunda Leitura\s*[—-]\s*([^\n]*)", texto, flags=re.MULTILINE | re.IGNORECASE
+        )
+        if not m_ini:
+            return None
+        ref = m_ini.group(1).strip()
+        resto = texto[m_ini.end():]
+
+        # Fim do bloco: o que vier primeiro entre o refrão da Aclamação
+        # ("Aleluia..."), o símbolo "℣." solto (aclamação própria, sem
+        # "Aleluia" — ex.: Quaresma) ou o cabeçalho do Evangelho — igual
+        # à janela já usada em extrair_aclamacao_pocketterco, só que
+        # aqui é o LIMITE, não o início.
+        candidatos_fim = []
+        m_aleluia = re.search(r"Aleluia,?\s*Aleluia,?\s*Aleluia\.?", resto, flags=re.IGNORECASE)
+        if m_aleluia:
+            candidatos_fim.append(m_aleluia.start())
+        m_refrao_simbolo = re.search(r"℟\.?", resto)
+        if m_refrao_simbolo:
+            candidatos_fim.append(m_refrao_simbolo.start())
+        m_versiculo_simbolo = re.search(r"℣\.?", resto)
+        if m_versiculo_simbolo:
+            candidatos_fim.append(m_versiculo_simbolo.start())
+        m_evangelho = re.search(r"^Evangelho\s*[—-]", resto, flags=re.MULTILINE | re.IGNORECASE)
+        if m_evangelho:
+            candidatos_fim.append(m_evangelho.start())
+
+        fim = min(candidatos_fim) if candidatos_fim else len(resto)
+        conteudo = resto[:fim].strip()
+        if not conteudo:
+            return None
+        return {"ref": ref, "texto": conteudo, "url": url}
+    except Exception:
+        return None
+
+
+# ============================================================
 # FONTE do Salmo Responsorial (Seção 09): Pocket Terço
 # ============================================================
 #
@@ -647,6 +711,18 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
     if dia_gcatholic:
         base.titulo_dia = dia_gcatholic["titulo"]
         base.cor_liturgica = dia_gcatholic["cor"]
+
+    # Segunda Leitura (Seção 10): CNBB/Nova Aliança continuam sendo a
+    # fonte principal, mas o Pocket Terço SUBSTITUI o texto quando
+    # responder (ver comentário de extrair_leitura2_pocketterco acima —
+    # bug real de 21/09/2026 em que o versículo da Aclamação vinha
+    # colado ao final da 2ª Leitura antes mesmo do "Palavra do
+    # Senhor.").
+    leitura2_pt = extrair_leitura2_pocketterco(dia)
+    if leitura2_pt and leitura2_pt["texto"]:
+        base.leitura2_texto = leitura2_pt["texto"]
+        if leitura2_pt["ref"]:
+            base.leitura2_ref = leitura2_pt["ref"]
 
     # Aclamação ao Evangelho (Seção 11): Pocket Terço é a fonte
     # principal (testada e funcionando — ver
