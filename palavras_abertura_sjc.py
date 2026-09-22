@@ -166,6 +166,16 @@ def _extrair_introducao(texto_pdf: str) -> str:
 
     introducao = antes[m_titulo.end():].strip()
     introducao = re.sub(r"\n{2,}", "\n\n", introducao)
+    # As quebras de linha simples que sobram são apenas o "wrap" de linha
+    # da coluna estreita do PDF original, não quebras de parágrafo de
+    # verdade — se preservadas, viram <br/> forçado no PDF gerado, e o
+    # ReportLab não estica (justifica) uma linha terminada em <br/>.
+    # Protege as quebras de parágrafo reais (\n\n), troca as simples por
+    # espaço, e depois restaura os parágrafos.
+    _MARCA_PARAGRAFO = "\x00PARA\x00"
+    introducao = introducao.replace("\n\n", _MARCA_PARAGRAFO)
+    introducao = introducao.replace("\n", " ")
+    introducao = introducao.replace(_MARCA_PARAGRAFO, "\n\n")
     introducao = re.sub(r"[ \t]+", " ", introducao)
     # O boletim numera "1. CANTO DE ABERTURA" — como o corte acima é
     # antes de "CANTO DE ABERTURA", sobra o número/pontuação soltos

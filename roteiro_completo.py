@@ -143,7 +143,18 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     logo_igreja = _imagem_proporcional(fixo.LOGO_IGREJA_PATH, largura_logo)
     logo_osm = _imagem_proporcional(fixo.LOGO_OSM_PATH, largura_logo)
     if logo_igreja or logo_osm:
-        largura_coluna = doc.width / 2
+        # BUG REAL corrigido em 22/09/2026 (relatado pelo usuário: alinhar
+        # os logos à linha horizontal/ao texto): o Frame padrão do
+        # SimpleDocTemplate tem 6pt de padding interno de cada lado, que
+        # o Paragraph e o HRFlowable (a linha verde) já respeitam
+        # automaticamente — mas eu tinha dado ao Table a largura CHEIA
+        # (doc.width, margem a margem), sem descontar esse padding. O
+        # Table ficava então 6pt mais largo de cada lado que o resto do
+        # conteúdo, e os logos saíam ligeiramente PRA FORA do alinhamento
+        # do título/linha. Descontando os 2×6pt, a tabela ocupa
+        # exatamente a mesma largura útil que tudo mais no documento.
+        largura_util = doc.width - 12
+        largura_coluna = largura_util / 2
         linha_logos = [[logo_igreja or "", logo_osm or ""]]
         tabela_logos = Table(linha_logos, colWidths=[largura_coluna, largura_coluna])
         tabela_logos.setStyle(TableStyle([
@@ -159,7 +170,7 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         story.append(Spacer(1, 6))
 
     story.append(Paragraph("Montesenario", E["titulo"]))
-    story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino", E["subtitulo_data"]))
+    story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino - São José dos Campos", E["subtitulo_data"]))
     story.append(Paragraph(
         f"{data_fmt}" + (f" — {horario}" if horario else ""),
         E["subtitulo_data"],
