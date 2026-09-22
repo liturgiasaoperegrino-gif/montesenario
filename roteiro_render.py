@@ -367,8 +367,11 @@ def remover_glifos_invalidos(texto: str) -> str:
 
 
 _PADRAO_ULTIMA_RESPOSTA_DIALOGO_PREFACIO = re.compile(
-    r"^R\.?\s*.{0,60}salva[çc][ãa]o\.?\s*$", re.IGNORECASE | re.MULTILINE
+    r"(?:^|[-–]\s*|R\.?\s*)\s*[EÉé]\s+nosso\s+dever\s+e\s+nossa\s+salva[çc][ãa]o\.?",
+    re.IGNORECASE | re.MULTILINE,
 )
+_PADRAO_SANTO_SANTO_SANTO = re.compile(r"Santo,?\s*Santo,?\s*Santo", re.IGNORECASE)
+_PADRAO_TRACO_SOLTO_NO_FIM = re.compile(r"[\s–-]+$")
 
 
 def extrair_texto_proprio_prefacio(texto: str) -> str:
@@ -381,14 +384,33 @@ def extrair_texto_proprio_prefacio(texto: str) -> str:
     de boletim, era exatamente o trecho mais sujeito a caracteres
     quebrados (fonte sem mapeamento correto para acentos — ver
     remover_glifos_invalidos). Corta tudo até (e incluindo) a última
-    linha de resposta desse diálogo; se não achar esse diálogo no texto
-    (ex.: arquivo já sem esse cabeçalho), devolve o texto como veio."""
+    ocorrência da resposta final desse diálogo ('...nossa salvação');
+    se não achar esse diálogo no texto (ex.: arquivo já sem esse
+    cabeçalho), devolve o texto como veio.
+
+    BUG REAL corrigido em 21/09/2026 (2ª rodada, boletim real de
+    27/09/2026): o padrão antigo exigia a resposta numa linha própria
+    começando com 'R.' — mas o boletim usa marcador '-' (igual as
+    demais falas) e, como _extrair_prefacio já achata todo o texto em
+    uma linha só (sem quebras), o '^...$' nunca batia, deixando o
+    diálogo inteiro duplicado dentro do corpo do Prefácio. Agora casa
+    a resposta em QUALQUER lugar do texto (não precisa ser o início de
+    linha), com ou sem quebra de linha antes, e aceita tanto 'R.' '
+    quanto '-' como marcador.
+
+    Também garante que o texto termine em 'Santo, Santo, Santo...' —
+    fontes de boletim impresso costumam abreviar esse final (óbvio
+    para quem já sabe o Santo de cor) só com um travessão solto ('...a
+    uma só voz: -'), em vez de escrever o texto inteiro; sem completar
+    isso, a seção 16 terminava cortada no meio da frase."""
     if not texto:
         return texto
     ocorrencias = list(_PADRAO_ULTIMA_RESPOSTA_DIALOGO_PREFACIO.finditer(texto))
-    if ocorrencias:
-        return texto[ocorrencias[-1].end():].strip()
-    return texto.strip()
+    texto_proprio = texto[ocorrencias[-1].end():].strip() if ocorrencias else texto.strip()
+    if not _PADRAO_SANTO_SANTO_SANTO.search(texto_proprio):
+        texto_proprio = _PADRAO_TRACO_SOLTO_NO_FIM.sub("", texto_proprio).rstrip()
+        texto_proprio += "\n\nSanto, Santo, Santo..."
+    return texto_proprio
 
 
 def limpar_texto_leitura(

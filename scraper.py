@@ -65,16 +65,31 @@ HEADERS = {
 
 # Rótulos que marcam o início de cada bloco no texto da página do Nova
 # Aliança. A ordem importa: é usada para fatiar o texto bloco a bloco.
+#
+# IMPORTANTE: _texto_principal() usa soup.get_text("\n", strip=True), que
+# quebra em uma linha NOVA a cada nó de texto do HTML — então "Aleluia,
+# Aleluia, Aleluia." pode vir com cada palavra (ou cada "Aleluia,") em sua
+# própria linha, dependendo de como a página do Nova Aliança marca esse
+# trecho em tags separadas. O padrão antigo usava espaço LITERAL entre as
+# palavras (não bate com quebra de linha) e era case-sensitive — se a
+# marcação da página variasse (maiúscula, "!" em vez de ",", ou quebra de
+# linha), o marcador "aclamacao" simplesmente não era encontrado, e a
+# seção inteira da Aclamação (refrão + versículo) ficava GRUDADA no final
+# da Segunda Leitura até o próximo marcador ("evangelho") — mesma classe
+# de bug relatada pelo usuário em 21/09/2026 para a fonte CNBB, agora
+# encontrada também aqui em 27/09/2026 ("seção 10 misturada com a
+# antífona do evangelho"). Corrigido com (?i) e \s+ (que também casa
+# quebra de linha) no lugar do espaço literal.
 MARCADORES_NOVAALIANCA = [
-    ("antifona_entrada", r"Ant[ií]fona de entrada"),
-    ("gloria", r"^Gl[óo]ria$"),
-    ("coleta", r"^Coleta$"),
-    ("leitura1", r"Primeira Leitura\s*[—-]\s*"),
-    ("salmo", r"Salmo Responsorial\s*[—-]\s*"),
-    ("leitura2", r"Segunda Leitura\s*[—-]\s*"),
-    ("aclamacao", r"Aleluia,? Aleluia,? Aleluia"),
-    ("evangelho", r"^Evangelho\s*[—-]\s*"),
-    ("fim", r"PALAVRA DE VIDA|Compartilhe nas m[íi]dias"),
+    ("antifona_entrada", r"(?i)Ant[ií]fona de entrada"),
+    ("gloria", r"(?i)^Gl[óo]ria$"),
+    ("coleta", r"(?i)^Coleta$"),
+    ("leitura1", r"(?i)Primeira Leitura\s*[—-]\s*"),
+    ("salmo", r"(?i)Salmo Responsorial\s*[—-]\s*"),
+    ("leitura2", r"(?i)Segunda Leitura\s*[—-]\s*"),
+    ("aclamacao", r"(?i)Aleluia[!,.]?\s*Aleluia[!,.]?\s*Aleluia"),
+    ("evangelho", r"(?i)^Evangelho\s*[—-]\s*"),
+    ("fim", r"(?i)PALAVRA DE VIDA|Compartilhe nas m[íi]dias"),
 ]
 
 # Rótulos que marcam o início de cada bloco no texto do campo "body" da
@@ -141,10 +156,12 @@ class LiturgiaDoDia:
 
 def _fatiar_por_marcadores(texto: str, marcadores: list, case_sensitive_fim: bool = False) -> dict[str, str]:
     """Corta o texto corrido em blocos, usando `marcadores` (lista de
-    (nome, padrao_regex)) como pontos de corte. IGNORECASE se aplica a
-    todos os padrões — se algum precisar ser exato (ver aviso acima do
-    MARCADORES_CNBB), escreva o próprio padrão para não depender de
-    minúsculas/maiúsculas (ex.: \\bEVANGELHO\\b já é maiúsculo por si)."""
+    (nome, padrao_regex)) como pontos de corte. Só passa re.MULTILINE —
+    NÃO aplica IGNORECASE global (apesar do que uma versão antiga deste
+    comentário dizia); cada padrão precisa trazer seu próprio (?i) quando
+    a capitalização da fonte variar (ver MARCADORES_CNBB e
+    MARCADORES_NOVAALIANCA para exemplos), e omitir o (?i) só quando o
+    padrão precisar ser exato (ex.: \\bEVANGELHO\\b maiúsculo por si)."""
     posicoes = []
     for nome, padrao in marcadores:
         m = re.search(padrao, texto, flags=re.MULTILINE)

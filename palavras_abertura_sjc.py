@@ -180,14 +180,32 @@ def _extrair_aclamacao(texto_pdf: str) -> dict:
     """{'refrao': str, 'versiculo': str} a partir da seção 'ACLAMAÇÃO
     AO EVANGELHO' do boletim — usada como fallback do Pocket Terço
     (fonte principal). Levanta ValueError se a seção não existir ou
-    não tiver o padrão 'Aleluia, Aleluia, Aleluia. <versículo>'."""
+    não tiver o padrão 'Aleluia, Aleluia, Aleluia. <versículo>'.
+
+    BUG REAL corrigido em 21/09/2026 (2ª rodada, boletim real de
+    27/09/2026): nesta edição não existe cabeçalho numerado próprio
+    para o Evangelho logo depois da Aclamação — o texto emenda direto
+    do versículo pro diálogo fixo do Evangelho ('- O Senhor esteja
+    convosco! - Ele está no meio de nós. - Proclamação do Evangelho...')
+    e daí pro texto integral do Evangelho. Sem um cabeçalho pra cortar,
+    _isolar_secao ia até o PRÓXIMO cabeçalho numerado de verdade —
+    bem mais adiante — trazendo o Evangelho inteiro junto com o
+    versículo. Corrigido: o versículo termina no primeiro parágrafo
+    daquele bloco (a fonte separa os parágrafos por linha em branco);
+    o que vem depois (diálogo com marcador '-') é sempre outra coisa."""
     bloco = _isolar_secao(texto_pdf, r"ACLAMA[ÇC][ÃA]O\s+AO\s+EVANGELHO")
     if not bloco:
         raise ValueError("seção 'ACLAMAÇÃO AO EVANGELHO' não encontrada")
     m = _PADRAO_ACLAMACAO_SEM_SIMBOLO.search(bloco)
     if not m or not m.group(1).strip():
         raise ValueError("padrão 'Aleluia...' não encontrado no bloco")
-    return {"refrao": m.group(1).strip(), "versiculo": m.group(2).strip()}
+    versiculo_bruto = m.group(2)
+    m_fim_versiculo = re.search(r"\n\s*-", versiculo_bruto)
+    versiculo = versiculo_bruto[: m_fim_versiculo.start()] if m_fim_versiculo else versiculo_bruto
+    versiculo = re.sub(r"\s+", " ", versiculo).strip()
+    if not versiculo:
+        raise ValueError("versículo da Aclamação veio vazio")
+    return {"refrao": m.group(1).strip(), "versiculo": versiculo}
 
 
 def _extrair_oferendas(texto_pdf: str) -> str:
