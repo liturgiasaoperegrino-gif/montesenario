@@ -16,6 +16,7 @@ Rodar:
     streamlit run app.py
 """
 
+import re
 import tempfile
 from datetime import date, timedelta
 
@@ -214,17 +215,32 @@ def montar_dados_para_pdf(
     if salmo_texto_bruto.startswith("R:"):
         primeira_linha, _, resto = salmo_texto_bruto.partition("\n\n")
         salmo_refrao_auto = primeira_linha[2:].strip()
-        salmo_texto_bruto = resto
     else:
-        # Sem o marcador do Pocket Terço — é o despejo bruto da Nova
-        # Aliança/CNBB (fallback), com referência/números/fechamento
-        # junto e o refrão REPETIDO entre as estrofes (formato
-        # tradicional do saltério). Limpa o ruído e detecta o refrão
-        # pela repetição (ver separar_refrao_estrofes_salmo) em vez de
-        # deixá-lo duplicado feio no meio do texto.
-        salmo_limpo = limpar_texto_leitura(salmo_texto_bruto, salmo_ref, preservar_quebras=True)
-        salmo_refrao_auto, estrofes = separar_refrao_estrofes_salmo(salmo_limpo)
-        salmo_texto_bruto = "\n\n".join(f"- {e}" for e in estrofes)
+        resto = salmo_texto_bruto
+
+    # BUG REAL encontrado em 21/09/2026 (resincronização de 27/09/2026):
+    # o marcador "R:" acima só prova que extrair_salmo_pocketterco()
+    # conseguiu isolar o REFRÃO (símbolo '℟.') — não garante que também
+    # conseguiu separar as ESTROFES (linhas com '-'). Quando o refrão
+    # bate mas a extração das estrofes falha (site sem os '-' naquele
+    # dia, mudança de layout etc.), `resto` fica sendo o despejo BRUTO
+    # da Nova Aliança/CNBB (fallback dentro do scraper) — com a
+    # referência solta no início (às vezes sem os números que viravam
+    # sobrescrito no HTML, tipo "Sl 24, bc-5..." em vez de "Sl 24,
+    # 4bc-5...") e o refrão REPETIDO dentro do próprio texto corrido.
+    # Sem tratar isso, esse lixo ia direto pro PDF (era exatamente o
+    # texto duplicado/com a referência quebrada que apareceu de novo).
+    # Se `resto` já vier em estrofes limpas (uma por linha, começando
+    # com '-' — o formato que o próprio Pocket Terço/scraper produz
+    # quando funciona), não mexe; senão, limpa e detecta o refrão pela
+    # repetição, do mesmo jeito que já era feito no fallback sem "R:".
+    if not re.match(r"^-\s", resto.strip()):
+        resto_sem_ref_solta = re.sub(r"(?im)^\s*Sl\.?\s*\d+.*$\n?", "", resto, count=1)
+        salmo_limpo = limpar_texto_leitura(resto_sem_ref_solta, salmo_ref, preservar_quebras=True)
+        refrao_detectado, estrofes = separar_refrao_estrofes_salmo(salmo_limpo)
+        salmo_refrao_auto = salmo_refrao_auto or refrao_detectado
+        resto = "\n\n".join(f"- {e}" for e in estrofes)
+    salmo_texto_bruto = resto
 
     # Prefácio (Seção 16): manual (tela dedicada) > sugestão automática
     # do boletim da Diocese de SJC (só domingo, já vem em

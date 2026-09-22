@@ -78,16 +78,34 @@ MARCADORES_NOVAALIANCA = [
 ]
 
 # Rótulos que marcam o início de cada bloco no texto do campo "body" da
-# API da CNBB. IMPORTANTE: o marcador de "evangelho" precisa ser
-# case-sensitive (só o cabeçalho "EVANGELHO" em maiúsculas) — do
-# contrário ele bate sem querer dentro de "Aclamação ao Evangelho" e
-# some com esse bloco (bug real encontrado e corrigido durante os testes).
+# API da CNBB.
+#
+# Os marcadores usam (?i) (case-insensitive só NAQUELE padrão, via
+# re.search) porque a CNBB às vezes publica o cabeçalho da Aclamação em
+# CAIXA ALTA ("ACLAMAÇÃO AO EVANGELHO", igual "PRIMEIRA LEITURA"/
+# "SEGUNDA LEITURA"), em vez do formato misto "Aclamação ao Evangelho".
+# Sem o (?i), esse cabeçalho não batia com o padrão antigo, o corte da
+# Seção 10 (Segunda Leitura) nunca encontrava o início da Aclamação, e
+# o bloco inteiro da Aclamação (rubrica + refrão + versículo) ficava
+# GRUDADO no final do texto da Segunda Leitura até o próximo marcador
+# que batesse — bug real relatado pelo usuário em 21/09/2026 (comparar
+# as duas últimas linhas da 2ª Leitura com a Aclamação).
+#
+# IMPORTANTE (2º bug, encontrado testando o primeiro): o marcador de
+# "evangelho" precisa casar SÓ com o cabeçalho da própria seção
+# Evangelho, âncorado no início da linha (^EVANGELHO\b) — não basta
+# ser case-sensitive, porque quando a Aclamação vem em CAIXA ALTA
+# ("ACLAMAÇÃO AO EVANGELHO"), a palavra "EVANGELHO" no FIM dessa linha
+# já bate maiúscula com \bEVANGELHO\b sem âncora, fazendo o corte cair
+# ali dentro e sumir com o bloco da Aclamação inteiro (e ainda grudar o
+# começo do Evangelho real dentro dele). Âncorado em início de linha,
+# só o cabeçalho de verdade (que ocupa a linha inteira sozinho) bate.
 MARCADORES_CNBB = [
-    ("leitura1", r"PRIMEIRA LEITURA"),
-    ("leitura2", r"SEGUNDA LEITURA"),
-    ("salmo", r"Salmo responsorial"),
-    ("aclamacao", r"Aclama[çc][ãa]o ao Evangelho"),
-    ("evangelho", r"\bEVANGELHO\b"),
+    ("leitura1", r"(?i)PRIMEIRA LEITURA"),
+    ("leitura2", r"(?i)SEGUNDA LEITURA"),
+    ("salmo", r"(?i)Salmo responsorial"),
+    ("aclamacao", r"(?i)Aclama[çc][ãa]o ao Evangelho"),
+    ("evangelho", r"^EVANGELHO\b"),
 ]
 
 
