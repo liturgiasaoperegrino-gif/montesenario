@@ -29,9 +29,12 @@ Duas coisas que valem destacar:
 
 from __future__ import annotations
 
+import io
+
+import requests
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Image
 
 import roteiro_fixo as fixo
 from roteiro_render import (
@@ -40,6 +43,19 @@ from roteiro_render import (
     remover_glifos_invalidos, extrair_texto_proprio_prefacio,
     COR_REFRAO,
 )
+
+
+def _baixar_logo_para_pdf():
+    """Baixa o logo (fixo.LOGO_URL) como bytes em memória, prontos pro
+    reportlab.platypus.Image. Retorna None em qualquer falha de rede —
+    o PDF é gerado normalmente sem o logo nesse caso, em vez de quebrar
+    a geração inteira por causa de uma imagem."""
+    try:
+        resp = requests.get(fixo.LOGO_URL, timeout=10)
+        resp.raise_for_status()
+        return io.BytesIO(resp.content)
+    except Exception:
+        return None
 
 
 def _override_ou(overrides: dict, numero: str, padrao):
@@ -107,6 +123,18 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
 
     data_fmt = f"{dados['data_iso'][8:10]}/{dados['data_iso'][5:7]}/{dados['data_iso'][0:4]}"
     horario = _override_ou(overrides, "00", dados.get("horario_missa", ""))
+
+    logo_bytes = _baixar_logo_para_pdf()
+    if logo_bytes:
+        try:
+            imagem_logo = Image(logo_bytes, width=2.5 * cm, height=2.5 * cm)
+            imagem_logo.hAlign = "CENTER"
+            story.append(imagem_logo)
+            story.append(Spacer(1, 6))
+        except Exception:
+            # Bytes baixados mas reportlab não conseguiu decodificar como
+            # imagem (formato inesperado etc.) — segue sem o logo.
+            pass
 
     story.append(Paragraph("Montesenario", E["titulo"]))
     story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino", E["subtitulo_data"]))

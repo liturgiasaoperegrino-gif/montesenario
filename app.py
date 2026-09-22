@@ -47,9 +47,7 @@ from roteiro_render import (
     cor_do_tema, limpar_texto_leitura, separar_refrao_estrofes_salmo,
     remover_glifos_invalidos,
 )
-from roteiro_fixo import intro_leitura, nome_evangelista
-
-LOGO_URL = "https://i.ibb.co/j92LZnZJ/novo-logo-oficial.png"
+from roteiro_fixo import intro_leitura, nome_evangelista, LOGO_URL
 
 st.set_page_config(page_title="Montesenario", page_icon=LOGO_URL, layout="centered")
 

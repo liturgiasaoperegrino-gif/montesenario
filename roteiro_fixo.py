@@ -16,6 +16,11 @@ preto, justificado).
 
 import re
 
+# Logo oficial da Igreja São Peregrino — usado no cabeçalho do app
+# (app.py) e no topo do PDF gerado (roteiro_completo.py). Fonte única
+# pra trocar em um lugar só, se um dia mudar de novo.
+LOGO_URL = "https://i.ibb.co/HLqFZgZK/logo-igreja.jpg"
+
 SAUDACAO_INICIAL = [
     # A saudação de abertura é feita pelo comentarista, não pelo
     # celebrante — correção explícita do usuário.
