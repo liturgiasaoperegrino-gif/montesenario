@@ -49,7 +49,9 @@ from roteiro_render import (
 )
 from roteiro_fixo import intro_leitura, nome_evangelista
 
-st.set_page_config(page_title="Montesenario", page_icon="⛪", layout="centered")
+LOGO_URL = "https://i.ibb.co/j92LZnZJ/novo-logo-oficial.png"
+
+st.set_page_config(page_title="Montesenario", page_icon=LOGO_URL, layout="centered")
 
 
 @st.cache_resource
@@ -311,7 +313,11 @@ def montar_dados_para_pdf(
     }
 
 
-st.title("⛪ Montesenario")
+col_logo, col_titulo = st.columns([1, 6])
+with col_logo:
+    st.image(LOGO_URL, width=70)
+with col_titulo:
+    st.title("Montesenario")
 st.caption("Consulta de leituras e orações da missa do dia")
 
 aba_consulta, aba_admin, aba_gerenciar = st.tabs(

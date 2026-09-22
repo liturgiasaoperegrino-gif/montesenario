@@ -513,6 +513,59 @@ def extrair_leitura2_pocketterco(dia: date) -> Optional[dict]:
 
 
 # ============================================================
+# FONTE alternativa da Antífona de Entrada e Coleta (Seção 03/06):
+# Pocket Terço
+# ============================================================
+#
+# Pedido do usuário em 22/09/2026: confirmado por inspeção do HTML real
+# que o Pocket Terço TEM as duas ("Antífona de entrada" e "Coleta"),
+# ao contrário do que eu tinha assumido antes (achava que só o Nova
+# Aliança tinha). Diferente das outras extrações desta fonte, usa o
+# HTML estruturado diretamente (BeautifulSoup, não texto corrido)
+# porque a Antífona de Entrada tem DUAS versões lado a lado dentro do
+# mesmo bloco — Missal/vernáculo (a que o roteiro usa) e Gradual
+# Romano/latim, alternadas por abas — e só dá pra separar uma da outra
+# pelo id da <div> (antifonaEntradaMissal), não por marcador de texto.
+# A Coleta não tem id próprio: é identificada pelo bloco
+# "bloco-oracao" cujo primeiro <p> é exatamente a palavra "Coleta"
+# (comparação exata — não confundir com outro cabeçalho parecido).
+
+def extrair_antifona_coleta_pocketterco(dia: date) -> Optional[dict]:
+    """Retorna {'antifona_entrada': str, 'coleta': str, 'url': str}, ou
+    None se a fonte não responder ou não trouxer nenhuma das duas."""
+    url = montar_url_pocketterco(dia)
+    try:
+        html = _baixar_html(url)
+        if html is None:
+            return None
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Sem separador entre nós de texto (get_text(strip=True), não
+        # get_text(" ", strip=True)) — a letra maiúscula decorativa do
+        # início ("T", "Ó"...) fica num <span> separado logo antes do
+        # resto da palavra, e um separador de espaço vira "T udo" em vez
+        # de "Tudo".
+        div_antifona = soup.find(id="antifonaEntradaMissal")
+        antifona = div_antifona.get_text(strip=True) if div_antifona else ""
+
+        coleta = ""
+        for bloco in soup.find_all("div", class_="bloco-oracao"):
+            primeiro_p = bloco.find("p")
+            if primeiro_p and primeiro_p.get_text(strip=True).lower() == "coleta":
+                paragrafos = bloco.find_all("p")[1:]
+                coleta = " ".join(
+                    p.get_text(strip=True) for p in paragrafos
+                ).strip()
+                break
+
+        if not antifona and not coleta:
+            return None
+        return {"antifona_entrada": antifona, "coleta": coleta, "url": url}
+    except Exception:
+        return None
+
+
+# ============================================================
 # FONTE do Salmo Responsorial (Seção 09): Pocket Terço
 # ============================================================
 #
@@ -731,9 +784,28 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
         base.fonte_propers = ""
         base.aviso_fonte = (
             "Leituras confirmadas, mas Antífona de Entrada e Coleta "
-            "ainda não disponíveis: o Nova Aliança (única fonte dessas "
-            "duas orações) não publicou esta data ainda."
+            "ainda não disponíveis: nem o Nova Aliança nem o Pocket "
+            "Terço publicaram esta data ainda."
         )
+
+    # Antífona de Entrada e Coleta (Seções 03/06): Pocket Terço SUBSTITUI
+    # o Nova Aliança quando responder — pedido do usuário em 22/09/2026,
+    # depois de confirmar por inspeção do HTML real que essa fonte TEM
+    # as duas seções (antes eu achava que só o Nova Aliança tinha — bem
+    # menos confiável de extrair, ver comentário em MARCADORES_NOVAALIANCA
+    # acima). O Nova Aliança continua sendo consultado (bloco acima)
+    # como fallback, para o caso do Pocket Terço não ter publicado esta
+    # data ainda.
+    antifona_coleta_pt = extrair_antifona_coleta_pocketterco(dia)
+    if antifona_coleta_pt:
+        if antifona_coleta_pt["antifona_entrada"]:
+            base.antifona_entrada = antifona_coleta_pt["antifona_entrada"]
+        if antifona_coleta_pt["coleta"]:
+            base.coleta = antifona_coleta_pt["coleta"]
+        if antifona_coleta_pt["antifona_entrada"] or antifona_coleta_pt["coleta"]:
+            base.fonte_propers = "Pocket Terço"
+            if base.aviso_fonte.startswith("Leituras confirmadas, mas Antífona"):
+                base.aviso_fonte = ""
 
     dia_gcatholic = obter_dia_liturgico(dia)
     if dia_gcatholic:
