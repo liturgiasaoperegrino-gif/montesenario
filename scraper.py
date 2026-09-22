@@ -762,21 +762,6 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
         base.aclamacao_versiculo = aclamacao["versiculo"]
         base.fonte_aclamacao = f"Pocket Terço ({aclamacao['url']})"
 
-    # Defesa final (Seção 10 x Seção 11): não importa qual fonte gerou
-    # leitura2_texto (CNBB, Nova Aliança ou o próprio Pocket Terço
-    # acima) nem o motivo exato do vazamento — bug real de 21/09/2026
-    # em que o refrão/versículo da Aclamação continuaram grudados ao
-    # final da 2ª Leitura mesmo depois de duas rodadas de correção nos
-    # marcadores. Como o refrão e o versículo da Aclamação já foram
-    # isolados com sucesso alguns passos acima (Pocket Terço, testado),
-    # usa-se esse resultado como verdade e corta-se do leitura2_texto
-    # qualquer coisa a partir de onde ele aparecer — não depende de
-    # entender POR QUE a fonte da 2ª Leitura grudou o texto.
-    if base.leitura2_texto and (base.aclamacao_refrao or base.aclamacao_versiculo):
-        base.leitura2_texto = _cortar_vazamento_aclamacao(
-            base.leitura2_texto, [base.aclamacao_refrao, base.aclamacao_versiculo]
-        )
-
     # Salmo Responsorial (Seção 09): Pocket Terço é a ÚNICA fonte do
     # refrão isolado (nem CNBB nem Nova Aliança separam refrão de
     # estrofe) — pedido explícito do usuário. Quando encontrado,
@@ -808,6 +793,24 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
         if boletim["prefacio_nome"]:
             base.prefacio_nome_auto = boletim["prefacio_nome"]
             base.prefacio_texto_auto = boletim["prefacio_texto"]
+
+    # Defesa final (Seção 10 x Seção 11): não importa qual fonte gerou
+    # leitura2_texto (CNBB, Nova Aliança ou o próprio Pocket Terço lá em
+    # cima) nem o motivo exato do vazamento — bug real de 21/09-22/09/2026
+    # em que o refrão/versículo da Aclamação continuaram grudados ao
+    # final da 2ª Leitura mesmo depois de várias rodadas de correção nos
+    # marcadores. FICA POR ÚLTIMO DE PROPÓSITO (depois do boletim da
+    # Diocese de SJC): bug real encontrado em 22/09/2026 — quando o
+    # Pocket Terço não responde a partir do servidor do Streamlit Cloud
+    # (mesmo respondendo daqui, testado contra o HTML real da página),
+    # aclamacao_refrao/versiculo só ficam preenchidos pelo boletim da
+    # Diocese de SJC, MAIS ABAIXO no código — rodar esse corte antes
+    # disso (como a 1ª versão fazia) deixava a defesa sem nada pra
+    # comparar, e o vazamento continuava mesmo com "Forçar nova busca".
+    if base.leitura2_texto and (base.aclamacao_refrao or base.aclamacao_versiculo):
+        base.leitura2_texto = _cortar_vazamento_aclamacao(
+            base.leitura2_texto, [base.aclamacao_refrao, base.aclamacao_versiculo]
+        )
 
     return base
 
