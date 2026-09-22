@@ -84,9 +84,9 @@ MARCADORES_NOVAALIANCA = [
     ("antifona_entrada", r"(?i)Ant[ií]fona de entrada"),
     ("gloria", r"(?i)^Gl[óo]ria$"),
     ("coleta", r"(?i)^Coleta$"),
-    ("leitura1", r"(?i)Primeira Leitura\s*[—-]\s*"),
-    ("salmo", r"(?i)Salmo Responsorial\s*[—-]\s*"),
-    ("leitura2", r"(?i)Segunda Leitura\s*[—-]\s*"),
+    ("leitura1", r"(?i)Primeira\s+Leitura\s*[—-]\s*"),
+    ("salmo", r"(?i)Salmo\s+Responsorial\s*[—-]\s*"),
+    ("leitura2", r"(?i)Segunda\s+Leitura\s*[—-]\s*"),
     ("aclamacao", r"(?i)Aleluia[!,.]?\s*Aleluia[!,.]?\s*Aleluia"),
     ("evangelho", r"(?i)^Evangelho\s*[—-]\s*"),
     ("fim", r"(?i)PALAVRA DE VIDA|Compartilhe nas m[íi]dias"),
@@ -152,6 +152,34 @@ class LiturgiaDoDia:
     fonte_aclamacao: str = ""
     prefacio_nome_auto: str = ""  # Seção 16 — sugestão automática (Diocese de SJC, só domingo)
     prefacio_texto_auto: str = ""
+
+
+def _cortar_vazamento_aclamacao(leitura2_texto: str, pistas: list) -> str:
+    """Corta `leitura2_texto` a partir de onde qualquer uma das `pistas`
+    (refrão e/ou versículo da Aclamação, já extraídos com sucesso de
+    outra fonte) aparecer dentro dele — usado como defesa final contra
+    o refrão/versículo da Aclamação ficando grudado ao final da 2ª
+    Leitura, não importa a fonte nem o motivo exato do vazamento (ver
+    comentário no ponto de chamada, em extrair_liturgia_do_dia).
+
+    Cada pista é comparada só pelos primeiros ~40 caracteres, com \\s+
+    no lugar dos espaços originais (tolerante a diferença de quebra de
+    linha entre as duas extrações) e sem diferenciar maiúsculas."""
+    posicoes = []
+    for pista in pistas:
+        pista = (pista or "").strip()
+        if len(pista) < 8:
+            continue
+        palavras = pista[:40].split()
+        if not palavras:
+            continue
+        padrao = r"\s+".join(re.escape(p) for p in palavras)
+        m = re.search(padrao, leitura2_texto, flags=re.IGNORECASE)
+        if m:
+            posicoes.append(m.start())
+    if not posicoes:
+        return leitura2_texto
+    return leitura2_texto[: min(posicoes)].strip()
 
 
 def _fatiar_por_marcadores(texto: str, marcadores: list, case_sensitive_fim: bool = False) -> dict[str, str]:
@@ -377,8 +405,8 @@ def extrair_aclamacao_pocketterco(dia: date) -> Optional[dict]:
         m_evangelho = re.search(r"^Evangelho\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
         fim = m_evangelho.start() if m_evangelho else len(texto)
 
-        m_leitura2 = re.search(r"^Segunda Leitura\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
-        m_leitura1 = re.search(r"^Primeira Leitura\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
+        m_leitura2 = re.search(r"^Segunda\s+Leitura\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
+        m_leitura1 = re.search(r"^Primeira\s+Leitura\s*[—-]", texto, flags=re.MULTILINE | re.IGNORECASE)
         m_ref_anterior = m_leitura2 or m_leitura1
         inicio_janela = m_ref_anterior.end() if m_ref_anterior else 0
 
@@ -449,7 +477,7 @@ def extrair_leitura2_pocketterco(dia: date) -> Optional[dict]:
         texto = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
         m_ini = re.search(
-            r"^Segunda Leitura\s*[—-]\s*([^\n]*)", texto, flags=re.MULTILINE | re.IGNORECASE
+            r"^Segunda\s+Leitura\s*[—-]\s*([^\n]*)", texto, flags=re.MULTILINE | re.IGNORECASE
         )
         if not m_ini:
             return None
@@ -495,9 +523,9 @@ def extrair_leitura2_pocketterco(dia: date) -> Optional[dict]:
 # uma vez, em destaque, no início — ver roteiro_completo.py Seção 09),
 # mesmo que a fonte o repita entre elas.
 
-_PADRAO_SALMO_HEADING = re.compile(r"^Salmo Responsorial\b.*$", re.MULTILINE | re.IGNORECASE)
+_PADRAO_SALMO_HEADING = re.compile(r"^Salmo\s+Responsorial\b.*$", re.MULTILINE | re.IGNORECASE)
 _PADRAO_PROXIMA_SECAO_APOS_SALMO = re.compile(
-    r"^(Segunda Leitura|Evangelho)\s*[—-]", re.MULTILINE | re.IGNORECASE
+    r"^(Segunda\s+Leitura|Evangelho)\s*[—-]", re.MULTILINE | re.IGNORECASE
 )
 
 
@@ -606,9 +634,9 @@ def extrair_liturgia_novaalianca(dia: date) -> Optional[LiturgiaDoDia]:
         blocos = _fatiar_por_marcadores(texto, MARCADORES_NOVAALIANCA)
 
         # Referências vêm coladas no próprio marcador (ex.: "Primeira Leitura — Ez 18, 25-28")
-        ref1 = re.search(r"Primeira Leitura\s*[—-]\s*([^\n]+)", texto)
-        ref_salmo = re.search(r"Salmo Responsorial\s*[—-]\s*([^\n]+)", texto)
-        ref2 = re.search(r"Segunda Leitura\s*[—-]\s*([^\n]+)", texto)
+        ref1 = re.search(r"Primeira\s+Leitura\s*[—-]\s*([^\n]+)", texto)
+        ref_salmo = re.search(r"Salmo\s+Responsorial\s*[—-]\s*([^\n]+)", texto)
+        ref2 = re.search(r"Segunda\s+Leitura\s*[—-]\s*([^\n]+)", texto)
         ref_ev = re.search(r"Evangelho\s*[—-]\s*([^\n]+)", texto)
 
         return LiturgiaDoDia(
@@ -733,6 +761,21 @@ def extrair_liturgia_do_dia(dia: date) -> LiturgiaDoDia:
         base.aclamacao_refrao = aclamacao["refrao"]
         base.aclamacao_versiculo = aclamacao["versiculo"]
         base.fonte_aclamacao = f"Pocket Terço ({aclamacao['url']})"
+
+    # Defesa final (Seção 10 x Seção 11): não importa qual fonte gerou
+    # leitura2_texto (CNBB, Nova Aliança ou o próprio Pocket Terço
+    # acima) nem o motivo exato do vazamento — bug real de 21/09/2026
+    # em que o refrão/versículo da Aclamação continuaram grudados ao
+    # final da 2ª Leitura mesmo depois de duas rodadas de correção nos
+    # marcadores. Como o refrão e o versículo da Aclamação já foram
+    # isolados com sucesso alguns passos acima (Pocket Terço, testado),
+    # usa-se esse resultado como verdade e corta-se do leitura2_texto
+    # qualquer coisa a partir de onde ele aparecer — não depende de
+    # entender POR QUE a fonte da 2ª Leitura grudou o texto.
+    if base.leitura2_texto and (base.aclamacao_refrao or base.aclamacao_versiculo):
+        base.leitura2_texto = _cortar_vazamento_aclamacao(
+            base.leitura2_texto, [base.aclamacao_refrao, base.aclamacao_versiculo]
+        )
 
     # Salmo Responsorial (Seção 09): Pocket Terço é a ÚNICA fonte do
     # refrão isolado (nem CNBB nem Nova Aliança separam refrão de
