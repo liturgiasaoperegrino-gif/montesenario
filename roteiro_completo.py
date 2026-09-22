@@ -32,6 +32,7 @@ from __future__ import annotations
 import io
 
 import requests
+from PIL import Image as PILImage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Image
@@ -127,13 +128,27 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     logo_bytes = _baixar_logo_para_pdf()
     if logo_bytes:
         try:
-            imagem_logo = Image(logo_bytes, width=2.5 * cm, height=2.5 * cm)
-            imagem_logo.hAlign = "CENTER"
+            # BUG REAL corrigido em 22/09/2026 (relatado pelo usuário): a
+            # 1ª versão forçava width=height=2.5cm, ignorando a proporção
+            # real da imagem — como o logo não é quadrado, ficava
+            # esticado/distorcido. Lê o tamanho de verdade com PIL e
+            # calcula a altura proporcional para uma largura fixa, em vez
+            # de forçar os dois lados a valores iguais.
+            largura_alvo = 2.5 * cm
+            largura_px, altura_px = PILImage.open(logo_bytes).size
+            logo_bytes.seek(0)
+            altura_alvo = largura_alvo * (altura_px / largura_px)
+
+            imagem_logo = Image(logo_bytes, width=largura_alvo, height=altura_alvo)
+            # Alinhado à ESQUERDA do cabeçalho (pedido do usuário) — o
+            # padrão do reportlab pra hAlign já seria "LEFT", mas fica
+            # explícito porque a 1ª versão tinha forçado "CENTER".
+            imagem_logo.hAlign = "LEFT"
             story.append(imagem_logo)
             story.append(Spacer(1, 6))
         except Exception:
-            # Bytes baixados mas reportlab não conseguiu decodificar como
-            # imagem (formato inesperado etc.) — segue sem o logo.
+            # Bytes baixados mas reportlab/PIL não conseguiram decodificar
+            # como imagem (formato inesperado etc.) — segue sem o logo.
             pass
 
     story.append(Paragraph("Montesenario", E["titulo"]))
