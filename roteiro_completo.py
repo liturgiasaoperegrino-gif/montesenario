@@ -160,7 +160,16 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         tabela_logos.setStyle(TableStyle([
             ("ALIGN", (0, 0), (0, 0), "LEFT"),
             ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            # BUG REAL corrigido em 22/09/2026 (2ª rodada): como os dois
+            # logos têm proporções diferentes (a largura é igual, mas a
+            # altura de cada um é calculada proporcionalmente ao arquivo
+            # original — ver _imagem_proporcional), VALIGN="TOP" alinhava
+            # só o topo dos dois, deixando a base do logo mais baixo (o
+            # da Ordem dos Servos de Maria) sobrando abaixo do outro,
+            # fora do nível do texto/linha horizontal abaixo. Com
+            # VALIGN="BOTTOM" as bases dos dois ficam no mesmo nível,
+            # coladas ao texto/linha que vem em seguida.
+            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
             ("LEFTPADDING", (0, 0), (-1, -1), 0),
             ("RIGHTPADDING", (0, 0), (-1, -1), 0),
             ("TOPPADDING", (0, 0), (-1, -1), 0),
@@ -170,9 +179,9 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         story.append(Spacer(1, 6))
 
     story.append(Paragraph("Montesenario", E["titulo"]))
-    story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino - São José dos Campos", E["subtitulo_data"]))
+    story.append(Paragraph("Semanário Litúrgico da Igreja São Peregrino", E["subtitulo_data"]))
     story.append(Paragraph(
-        f"{data_fmt}" + (f" — {horario}" if horario else ""),
+        "São José dos Campos-SP — " + f"{data_fmt}" + (f" — {horario}" if horario else ""),
         E["subtitulo_data"],
     ))
     story.append(HRFlowable(width="100%", thickness=1, color=dados["cor_tema"], spaceAfter=10))
@@ -259,7 +268,8 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
         paragrafos_livres(overrides["08"])
     else:
         _renderizar_leitura(story, E, dados["leitura1"])
-        dialogo([("", "Palavra do Senhor."), ("Todos", "Graças a Deus.")])
+        story.append(Paragraph("Palavra do Senhor.", E["fechamento_leitura"]))
+        dialogo([("Todos", "Graças a Deus.")])
 
     # 09 — Salmo Responsorial: formato-padrão dos boletins/missalinhas —
     # refrão primeiro (cantor/todos), depois CADA estrofe numerada
@@ -296,7 +306,8 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     elif dados.get("leitura2"):
         secao_titulo("10", f"Segunda Leitura {dados['leitura2_ref']}")
         _renderizar_leitura(story, E, dados["leitura2"])
-        dialogo([("", "Palavra do Senhor."), ("Todos", "Graças a Deus.")])
+        story.append(Paragraph("Palavra do Senhor.", E["fechamento_leitura"]))
+        dialogo([("Todos", "Graças a Deus.")])
 
     # 11 — Aclamação ao Evangelho: precedida do convite do comentarista e
     # de uma subseção "Canto de Aclamação do Evangelho" (padrão pedido
@@ -381,16 +392,24 @@ def montar_pdf(caminho_saida: str, dados: dict, overrides: dict | None = None):
     secao_titulo("18", "Oração após a Comunhão")
     paragrafos_livres(_override_ou(overrides, "18", dados["comunhao_texto"]))
 
-    # 19 — Novenas e Reflexões Especiais (em branco por padrão)
-    secao_titulo("19", "Novenas e Reflexões Especiais")
+    # 19 — Novenas e Reflexões Especiais: só aparece quando o operador
+    # preencheu algo em "Gerenciar Roteiro" para esta data/horário
+    # (pedido do usuário em 22/09/2026 — antes a seção sempre aparecia,
+    # mesmo vazia, com "Nenhuma inserida para esta data."). Quando não
+    # há nada, a seção inteira é omitida e a seção seguinte (Ritos
+    # Finais) sobe de número — de "20" para "19" — para não deixar um
+    # buraco na numeração impressa. A chave do override continua sendo
+    # "20" internamente (não muda com a renumeração exibida).
     over_19 = overrides.get("19")
     if over_19:
+        secao_titulo("19", "Novenas e Reflexões Especiais")
         paragrafos_livres(over_19)
+        numero_ritos_finais = "20"
     else:
-        story.append(Paragraph("Nenhuma inserida para esta data.", E["faltante"]))
+        numero_ritos_finais = "19"
 
-    # 20 — Ritos Finais e Bênção Final
-    secao_titulo("20", "Ritos Finais e Bênção Final")
+    # Ritos Finais e Bênção Final
+    secao_titulo(numero_ritos_finais, "Ritos Finais e Bênção Final")
     over_20 = overrides.get("20")
     if over_20:
         paragrafos_livres(over_20)

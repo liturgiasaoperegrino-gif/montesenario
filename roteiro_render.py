@@ -17,7 +17,7 @@ from collections import Counter
 
 from bs4 import BeautifulSoup
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
 from reportlab.platypus import Paragraph
 
 CORES_LITURGICAS = {
@@ -160,6 +160,14 @@ def montar_estilos(cor_tema: str) -> dict:
             alignment=TA_JUSTIFY),
         "corpo": ParagraphStyle("Corpo", parent=base["Normal"],
             fontSize=10.5, leading=15, alignment=TA_JUSTIFY, spaceAfter=6),
+        # Fechamento da leitura ("Palavra do Senhor." / "Palavra da
+        # Salvação."): pedido do usuário em 22/09/2026 para não usar mais
+        # o estilo de rubrica (centralizado, itálico, cinza, fonte menor)
+        # — precisa ficar alinhado à ESQUERDA e na MESMA fonte/tamanho do
+        # corpo da leitura. Só para essa linha; outras rubricas (ex.:
+        # "Oração do Pai Nosso") continuam usando o estilo "rubrica".
+        "fechamento_leitura": ParagraphStyle("FechamentoLeitura", parent=base["Normal"],
+            fontSize=10.5, leading=15, alignment=TA_LEFT, spaceAfter=6),
         "refrao": ParagraphStyle("RefraoSalmo", parent=base["Normal"],
             fontSize=10.5, leading=15, spaceAfter=8, textColor=COR_REFRAO,
             alignment=TA_JUSTIFY),

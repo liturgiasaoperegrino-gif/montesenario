@@ -20,6 +20,8 @@ import re
 import tempfile
 from datetime import date, timedelta
 
+import fitz  # PyMuPDF — usado só para renderizar as páginas do PDF como
+             # imagem na prévia paginada (ver _exibir_pdf_paginado)
 import streamlit as st
 
 from google.oauth2.service_account import Credentials
@@ -50,6 +52,57 @@ from roteiro_render import (
 from roteiro_fixo import intro_leitura, nome_evangelista, LOGO_IGREJA_PATH
 
 st.set_page_config(page_title="Montesenario", page_icon=LOGO_IGREJA_PATH, layout="centered")
+
+
+def _renderizar_paginas_pdf(pdf_bytes: bytes) -> list[bytes]:
+    """Recebe os bytes do PDF gerado e devolve uma lista de imagens PNG
+    (bytes), uma por página, em resolução boa o bastante pra leitura na
+    tela (zoom 2x = ~144dpi). Usado só para a prévia paginada — o PDF de
+    verdade (baixado pelo botão) continua sendo o arquivo original, sem
+    perda. Abre direto da memória (sem arquivo temporário)."""
+    paginas = []
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as documento:
+        for pagina in documento:
+            pixmap = pagina.get_pixmap(matrix=fitz.Matrix(2, 2))
+            paginas.append(pixmap.tobytes("png"))
+    return paginas
+
+
+def _exibir_pdf_paginado(pdf_bytes: bytes, chave: str):
+    """Prévia do PDF gerado, página por página — como no app 'Leitores
+    Peregrinos' (pedido do usuário em 22/09/2026): renderiza cada
+    página como imagem (via PyMuPDF) e mostra uma de cada vez, com
+    botões Anterior/Próxima e um indicador 'Página X de N', em vez de
+    só oferecer o download direto do arquivo."""
+    chave_paginas = f"pdf_paginas_{chave}"
+    chave_indice = f"pdf_indice_{chave}"
+
+    if chave_paginas not in st.session_state:
+        with st.spinner("Preparando prévia do PDF..."):
+            st.session_state[chave_paginas] = _renderizar_paginas_pdf(pdf_bytes)
+        st.session_state[chave_indice] = 0
+
+    paginas = st.session_state[chave_paginas]
+    total = len(paginas)
+    indice = st.session_state.get(chave_indice, 0)
+    indice = max(0, min(indice, total - 1))
+
+    st.image(paginas[indice], use_container_width=True)
+
+    col_ant, col_meio, col_prox = st.columns([1, 2, 1])
+    with col_ant:
+        if st.button("⬅️ Anterior", key=f"pdf_anterior_{chave}", disabled=(indice == 0)):
+            st.session_state[chave_indice] = indice - 1
+            st.rerun()
+    with col_meio:
+        st.markdown(
+            f"<div style='text-align:center'>Página {indice + 1} de {total}</div>",
+            unsafe_allow_html=True,
+        )
+    with col_prox:
+        if st.button("Próxima ➡️", key=f"pdf_proxima_{chave}", disabled=(indice >= total - 1)):
+            st.session_state[chave_indice] = indice + 1
+            st.rerun()
 
 
 @st.cache_resource
@@ -393,6 +446,7 @@ with aba_consulta:
         )
 
         st.divider()
+        chave_pdf_gerado = f"pdf_bytes_{data_escolhida.isoformat()}_{horario_escolhido}"
         if st.button("📄 Gerar PDF do roteiro completo (20 seções)"):
             with st.spinner("Montando o PDF..."):
                 overrides = carregar_overrides_secoes(conectar(), data_escolhida, horario_escolhido)
@@ -403,13 +457,24 @@ with aba_consulta:
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                     montar_pdf(tmp.name, dados_pdf, overrides=overrides)
                     caminho_pdf = tmp.name
-            with open(caminho_pdf, "rb") as f:
-                st.download_button(
-                    "⬇️ Baixar PDF",
-                    data=f.read(),
-                    file_name=f"roteiro_{data_escolhida.isoformat()}_{horario_escolhido.replace(':', 'h')}.pdf",
-                    mime="application/pdf",
-                )
+                with open(caminho_pdf, "rb") as f:
+                    pdf_bytes = f.read()
+            # Guarda os bytes do PDF (e reinicia a prévia paginada) no
+            # session_state: os botões Anterior/Próxima da prévia disparam
+            # st.rerun(), e sem isso o PDF teria que ser remontado do zero
+            # a cada clique de navegação de página.
+            st.session_state[chave_pdf_gerado] = pdf_bytes
+            st.session_state.pop(f"pdf_paginas_{chave_pdf_gerado}", None)
+            st.session_state.pop(f"pdf_indice_{chave_pdf_gerado}", None)
+
+        if st.session_state.get(chave_pdf_gerado):
+            pdf_bytes = st.session_state[chave_pdf_gerado]
+            st.download_button(
+                "⬇️ Baixar PDF",
+                data=pdf_bytes,
+                file_name=f"roteiro_{data_escolhida.isoformat()}_{horario_escolhido.replace(':', 'h')}.pdf",
+                mime="application/pdf",
+            )
             st.caption(
                 "Seções 02 (Palavras de Abertura), 11 (Aclamação) e 16 "
                 "(Prefácio sugerido) já vêm preenchidas automaticamente "
@@ -417,6 +482,7 @@ with aba_consulta:
                 "ajuste em 'Gerenciar Roteiro' se precisar de outra "
                 "redação."
             )
+            _exibir_pdf_paginado(pdf_bytes, chave_pdf_gerado)
 
 with aba_admin:
     st.write(
